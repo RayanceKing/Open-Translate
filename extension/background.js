@@ -1,23 +1,105 @@
-const mask = text => {
-  const values = [];
-  const put = value => `__OT_PRIVATE_${values.push(value) - 1}__`;
-  const safe = text.replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, put).replace(/\b(?:\+?\d[\s-]?){8,16}\b/g, put).replace(/\b(?:sk-[\w-]{16,}|ghp_[\w]{20,}|AKIA[\w]{16})\b/g, put);
-  return { safe, restore: output => output.replace(/__\s*OT_PRIVATE\s*_(\d+)\s*__/gi, (_, i) => values[Number(i)] || _) };
-};
-async function translate(text, target) {
-  const secured = mask(text);
-  const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=${encodeURIComponent(target)}&dt=t&q=${encodeURIComponent(secured.safe)}`;
-  const google = await fetch(url).then(async response => { if (!response.ok) throw new Error(`Google (${response.status})`); return response.json(); });
-  return secured.restore(google[0].map(item => item[0]).join(''));
+import { loadSettings } from './lib/store.js';
+import { translateTexts } from './lib/engines.js';
+import { maskAll } from './lib/privacy.js';
+import { AI_ENGINES } from './lib/defaults.js';
+
+const CACHE_LIMIT = 1000;
+const cache = new Map();
+
+function remember(key, value) {
+  if (cache.size >= CACHE_LIMIT) cache.delete(cache.keys().next().value);
+  cache.set(key, value);
 }
-chrome.runtime.onMessage.addListener((message, _, respond) => {
-  if (message.type !== 'translate') return;
-  translate(message.text, message.target).catch(async () => {
-    const secured = mask(message.text);
-    const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(secured.safe.slice(0, 500))}&langpair=auto%7C${encodeURIComponent(message.target)}`;
-    const response = await fetch(url); const result = await response.json();
-    if (!response.ok || result.responseStatus !== 200) throw new Error(result.responseDetails || '翻译服务不可用');
-    return secured.restore(result.responseData.translatedText);
-  }).then(text => respond({ text })).catch(error => respond({ error: error.message })); return true;
+
+async function handleTranslate({ texts = [], engine, source, target }) {
+  const settings = await loadSettings();
+  const useEngine = engine || settings.engine;
+  const to = target || settings.targetLanguage;
+  const from = source || settings.sourceLanguage || 'auto';
+  const config = { ...(settings.engines[useEngine] || {}) };
+  if (AI_ENGINES.includes(useEngine)) {
+    config.prompt = settings.ai.prompt || '';
+    config.glossary = settings.ai.glossary || '';
+    config.temperature = settings.ai.temperature;
+  }
+  const cacheKey = text => `${useEngine}|${to}|${text}`;
+
+  const results = new Array(texts.length);
+  const pending = [];
+  texts.forEach((text, index) => {
+    const hit = cache.get(cacheKey(text));
+    if (hit !== undefined) results[index] = hit;
+    else pending.push({ text, index });
+  });
+
+  if (pending.length) {
+    const guard = settings.privacy.maskSensitive ? maskAll(pending.map(item => item.text)) : null;
+    const payload = guard ? guard.safe : pending.map(item => item.text);
+    const translated = await translateTexts({ engine: useEngine, texts: payload, source: from, target: to, config });
+    translated.forEach((value, index) => {
+      const text = guard ? guard.restore(value) : value;
+      results[pending[index].index] = text;
+      remember(cacheKey(pending[index].text), text);
+    });
+  }
+
+  return results;
+}
+
+async function handleTest({ engine }) {
+  const settings = await loadSettings();
+  const useEngine = engine || settings.engine;
+  const config = { ...(settings.engines[useEngine] || {}) };
+  if (AI_ENGINES.includes(useEngine)) {
+    config.prompt = settings.ai.prompt || '';
+    config.glossary = settings.ai.glossary || '';
+    config.temperature = settings.ai.temperature;
+  }
+  const [sample] = await translateTexts({
+    engine: useEngine,
+    texts: ['The quick brown fox jumps over the lazy dog.'],
+    source: 'auto',
+    target: settings.targetLanguage,
+    config
+  });
+  return sample;
+}
+
+chrome.runtime.onMessage.addListener((message, _sender, respond) => {
+  const fail = error => respond({ error: error?.message || String(error) });
+
+  if (message?.type === 'translate') {
+    handleTranslate(message).then(texts => respond({ texts })).catch(fail);
+    return true;
+  }
+  if (message?.type === 'test-engine') {
+    handleTest(message).then(text => respond({ text })).catch(fail);
+    return true;
+  }
+  if (message?.type === 'open-options') {
+    chrome.runtime.openOptionsPage();
+    respond({ ok: true });
+    return false;
+  }
+  return false;
 });
-chrome.commands?.onCommand.addListener(async command => { if (command === 'toggle-translation') { const [tab] = await chrome.tabs.query({ active: true, currentWindow: true }); chrome.tabs.sendMessage(tab.id, { type: 'toggle' }); } });
+
+chrome.commands?.onCommand.addListener(async command => {
+  if (command !== 'toggle-translation') return;
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (tab?.id) chrome.tabs.sendMessage(tab.id, { type: 'toggle' }).catch(() => {});
+});
+
+chrome.runtime.onInstalled.addListener(() => {
+  try {
+    chrome.contextMenus.create({ id: 'ot-translate-selection', title: '翻译选中文本', contexts: ['selection'] });
+  } catch {
+    /* menu may already exist after an update */
+  }
+});
+
+chrome.contextMenus?.onClicked.addListener((info, tab) => {
+  if (info.menuItemId === 'ot-translate-selection' && tab?.id) {
+    chrome.tabs.sendMessage(tab.id, { type: 'translate-selection' }).catch(() => {});
+  }
+});

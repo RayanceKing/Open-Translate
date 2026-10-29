@@ -1,1 +1,46 @@
-<!doctype html><meta charset="utf-8"><title>Open Translate</title><style>body{width:230px;margin:16px;font:14px -apple-system,BlinkMacSystemFont,sans-serif;color:#222}label{display:block;margin-bottom:12px}input,button{box-sizing:border-box;width:100%;padding:8px;border-radius:7px;border:1px solid #c9c7d3}button{margin-top:7px;background:#6d5dfc;color:#fff;border:0;font-weight:600;cursor:pointer}button.secondary{background:#eee;color:#333}</style><label>目标语言 <input id="language" aria-label="目标语言代码" placeholder="zh-CN"></label><button id="translate">翻译此页</button><button id="restore" class="secondary">还原原文</button><script src="popup.js"></script>
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>Open Translate</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header class="head">
+    <div class="logo">译</div>
+    <div class="head-text">
+      <strong>Open Translate</strong>
+      <span id="page-host">当前页面</span>
+    </div>
+    <button class="icon" id="open-options" title="打开设置" aria-label="打开设置">⚙</button>
+  </header>
+
+  <div class="field">
+    <label for="engine">翻译引擎</label>
+    <select id="engine"></select>
+  </div>
+
+  <div class="field">
+    <label for="language">目标语言</label>
+    <select id="language"></select>
+  </div>
+
+  <div class="field">
+    <label>显示模式</label>
+    <div class="segmented" id="modes">
+      <button type="button" data-mode="bilingual">双语</button>
+      <button type="button" data-mode="translation">仅译文</button>
+      <button type="button" data-mode="hover">悬停</button>
+    </div>
+  </div>
+
+  <div class="actions">
+    <button class="primary" id="translate">翻译此页</button>
+    <button class="ghost" id="restore">还原原文</button>
+  </div>
+
+  <p class="status" id="status">快捷键 <kbd>Alt</kbd> + <kbd>T</kbd> 可随时切换</p>
+
+  <script type="module" src="popup.js"></script>
+</body>
+</html>

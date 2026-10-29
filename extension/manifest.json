@@ -1,12 +1,25 @@
 {
   "manifest_version": 3,
   "name": "Open Translate",
-  "version": "0.1.0",
-  "description": "Privacy-conscious in-place bilingual web translation.",
-  "permissions": ["storage", "activeTab"],
-  "host_permissions": ["http://*/*", "https://*/*", "https://translate.googleapis.com/*", "https://api.mymemory.translated.net/*"],
+  "version": "0.2.0",
+  "description": "Privacy-conscious in-place bilingual web translation with switchable engines and AI translation.",
+  "permissions": ["storage", "activeTab", "contextMenus"],
+  "host_permissions": ["http://*/*", "https://*/*"],
   "background": { "service_worker": "background.js", "type": "module" },
-  "content_scripts": [{ "matches": ["http://*/*", "https://*/*"], "js": ["content.js"], "css": ["content.css"], "run_at": "document_idle" }],
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["content.js"],
+      "css": ["content.css"],
+      "run_at": "document_idle"
+    }
+  ],
   "action": { "default_title": "Open Translate", "default_popup": "popup.html" },
-  "commands": { "toggle-translation": { "suggested_key": { "default": "Alt+T", "mac": "Alt+T" }, "description": "翻译或还原当前页面" } }
+  "options_ui": { "page": "options.html", "open_in_tab": true },
+  "commands": {
+    "toggle-translation": {
+      "suggested_key": { "default": "Alt+T", "mac": "Alt+T" },
+      "description": "翻译或还原当前页面"
+    }
+  }
 }

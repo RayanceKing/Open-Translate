@@ -1,0 +1,308 @@
+// Translation providers. Every provider exposes:
+//   translate({ texts, source, target, config, settings }) -> Promise<string[]>
+// Results keep the same order and length as `texts`.
+
+import { DEFAULT_PROMPT, LANG_LABEL } from './defaults.js';
+
+const TIMEOUT = 25000;
+
+async function http(url, options = {}, timeout = TIMEOUT) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeout);
+  try {
+    const response = await fetch(url, { ...options, signal: controller.signal });
+    const raw = await response.text();
+    let data = raw;
+    try {
+      data = raw ? JSON.parse(raw) : null;
+    } catch {
+      /* keep raw text */
+    }
+    if (!response.ok) throw new Error(describeError(response.status, data, raw));
+    return data;
+  } catch (error) {
+    if (error?.name === 'AbortError') throw new Error('翻译请求超时，请检查网络或接口地址');
+    if (error instanceof TypeError) throw new Error('无法连接翻译服务，请检查网络、域名或 CORS 设置');
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function describeError(status, data, raw) {
+  const detail =
+    data?.error?.message ||
+    data?.error?.type ||
+    data?.message ||
+    data?.error_description ||
+    (typeof data === 'string' ? data.slice(0, 120) : '') ||
+    String(raw || '').slice(0, 120);
+  if (status === 401 || status === 403) return `密钥无效或权限不足（HTTP ${status}）${detail ? '：' + detail : ''}`;
+  if (status === 429) return '请求过于频繁或额度用尽（HTTP 429），请稍后重试或更换引擎';
+  return `服务返回错误（HTTP ${status}）${detail ? '：' + detail : ''}`;
+}
+
+const trimSlash = value => String(value || '').replace(/\/+$/, '');
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+function targetLabel(code) {
+  return LANG_LABEL[code] || code;
+}
+
+// ---------------------------------------------------------------- language maps
+
+const DEEPL_LANG = { 'zh-CN': 'ZH', 'zh-TW': 'ZH-HANT', en: 'EN-US', pt: 'PT-PT', ja: 'JA', ko: 'KO' };
+const MS_LANG = { 'zh-CN': 'zh-Hans', 'zh-TW': 'zh-Hant' };
+const LIBRE_LANG = { 'zh-CN': 'zh', 'zh-TW': 'zt' };
+
+const deeplLang = code => DEEPL_LANG[code] || String(code).toUpperCase();
+const msLang = code => MS_LANG[code] || code;
+const libreLang = code => LIBRE_LANG[code] || String(code).split('-')[0];
+
+// ---------------------------------------------------------------- free engines
+
+async function googleOne(text, target) {
+  const url =
+    'https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=' +
+    encodeURIComponent(target) +
+    '&dt=t&q=' +
+    encodeURIComponent(text);
+  const data = await http(url);
+  if (!Array.isArray(data?.[0])) throw new Error('Google 翻译返回了意外的数据格式');
+  return data[0].map(segment => segment?.[0] || '').join('');
+}
+
+const google = {
+  id: 'google',
+  async translate({ texts, target }) {
+    const output = [];
+    for (const text of texts) output.push(await googleOne(text, target));
+    return output;
+  }
+};
+
+const mymemory = {
+  id: 'mymemory',
+  async translate({ texts, target }) {
+    const output = [];
+    for (const text of texts) {
+      const url =
+        'https://api.mymemory.translated.net/get?q=' +
+        encodeURIComponent(text.slice(0, 500)) +
+        '&langpair=auto%7C' +
+        encodeURIComponent(target);
+      const data = await http(url);
+      if (data?.responseStatus !== 200) throw new Error(data?.responseDetails || 'MyMemory 服务不可用');
+      output.push(data.responseData.translatedText);
+      await sleep(120);
+    }
+    return output;
+  }
+};
+
+// ---------------------------------------------------------------- keyed engines
+
+const deepl = {
+  id: 'deepl',
+  async translate({ texts, target, config }) {
+    const key = String(config.key || '').trim();
+    if (!key) throw new Error('尚未填写 DeepL API Key');
+    const base = config.pro ? 'https://api.deepl.com' : 'https://api-free.deepl.com';
+    const data = await http(`${base}/v2/translate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `DeepL-Auth-Key ${key}` },
+      body: JSON.stringify({ text: texts, target_lang: deeplLang(target) })
+    });
+    const translations = data?.translations;
+    if (!Array.isArray(translations) || translations.length !== texts.length) throw new Error('DeepL 返回的译文数量不匹配');
+    return translations.map(item => item.text);
+  }
+};
+
+const microsoft = {
+  id: 'microsoft',
+  async translate({ texts, target, config }) {
+    const key = String(config.key || '').trim();
+    if (!key) throw new Error('尚未填写 Microsoft 翻译订阅密钥');
+    const url = `https://api.cognitive.microsofttranslator.com/translate?api-version=3.0&to=${encodeURIComponent(msLang(target))}`;
+    const headers = { 'Content-Type': 'application/json', 'Ocp-Apim-Subscription-Key': key };
+    if (config.region && config.region !== 'global') headers['Ocp-Apim-Subscription-Region'] = config.region;
+    const data = await http(url, { method: 'POST', headers, body: JSON.stringify(texts.map(text => ({ Text: text }))) });
+    if (!Array.isArray(data) || data.length !== texts.length) throw new Error('Microsoft 翻译返回的译文数量不匹配');
+    return data.map(item => item?.translations?.[0]?.text || '');
+  }
+};
+
+const libre = {
+  id: 'libre',
+  async translate({ texts, target, config }) {
+    const base = trimSlash(config.url);
+    if (!base) throw new Error('尚未填写 LibreTranslate 实例地址');
+    const body = { q: texts, source: 'auto', target: libreLang(target), format: 'text' };
+    if (config.key) body.api_key = config.key;
+    const data = await http(`${base}/translate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    const result = data?.translatedText;
+    if (Array.isArray(result)) return result;
+    if (typeof result === 'string') return [result];
+    throw new Error('LibreTranslate 返回了意外的数据格式');
+  }
+};
+
+// ---------------------------------------------------------------- AI engines
+
+function buildPrompt({ texts, source, target, config }) {
+  const template = String(config.prompt || '').trim() || DEFAULT_PROMPT;
+  const head = template
+    .replaceAll('{{target}}', targetLabel(target))
+    .replaceAll('{{source}}', source && source !== 'auto' ? targetLabel(source) : 'the original language (auto-detect)');
+  const parts = [head];
+  const glossary = String(config.glossary || '').trim();
+  if (glossary) parts.push(`Glossary — always use these translations verbatim:\n${glossary}`);
+  if (texts.length === 1) {
+    parts.push(`Text:\n<<<\n${texts[0]}\n>>>`);
+  } else {
+    parts.push(
+      `The text contains ${texts.length} segments. Translate every segment and keep the leading number exactly as given:\n` +
+        texts.map((text, index) => `${index + 1}. ${text}`).join('\n')
+    );
+  }
+  return parts.join('\n\n');
+}
+
+function parseNumbered(raw, count) {
+  const map = new Map();
+  let current = null;
+  for (const line of String(raw).split('\n')) {
+    const match = /^\s*(\d+)\s*[.、)．:：]\s*(.*)$/.exec(line);
+    const index = match ? Number(match[1]) : NaN;
+    if (match && index >= 1 && index <= count) {
+      current = index;
+      map.set(index, match[2]);
+    } else if (current !== null && line.trim()) {
+      map.set(current, `${map.get(current) || ''}\n${line.trim()}`);
+    }
+  }
+  if (map.size !== count) return null;
+  return Array.from({ length: count }, (_, index) => (map.get(index + 1) || '').trim());
+}
+
+function cleanSingle(raw) {
+  return String(raw)
+    .replace(/^\s*<<<\s*/, '')
+    .replace(/\s*>>>\s*$/, '')
+    .replace(/^["'“”]([\s\S]*)["'“”]$/, '$1')
+    .trim();
+}
+
+async function runAi(ask, { texts, source, target, config }) {
+  if (texts.length === 1) return [cleanSingle(await ask(buildPrompt({ texts, source, target, config })))];
+  const batch = await ask(buildPrompt({ texts, source, target, config }));
+  const parsed = parseNumbered(batch, texts.length);
+  if (parsed) return parsed;
+  // The model ignored the numbering contract — fall back to one request per segment.
+  const output = [];
+  for (const text of texts) output.push(cleanSingle(await ask(buildPrompt({ texts: [text], source, target, config }))));
+  return output;
+}
+
+async function openAiChat({ texts, source, target, config }) {
+  const apiKey = String(config.apiKey || '').trim();
+  if (!apiKey) throw new Error('尚未填写 API Key');
+  const base = trimSlash(config.baseUrl) || 'https://api.openai.com/v1';
+  return runAi(async prompt => {
+    const data = await http(`${base}/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        model: config.model || 'gpt-4o-mini',
+        temperature: Number(config.temperature ?? 0.2),
+        messages: [
+          { role: 'system', content: 'You are a precise translator. You output only the translation.' },
+          { role: 'user', content: prompt }
+        ]
+      })
+    });
+    const content = data?.choices?.[0]?.message?.content;
+    if (!content) throw new Error('模型没有返回译文');
+    return content;
+  }, { texts, source, target, config });
+}
+
+const openai = { id: 'openai', translate: openAiChat };
+const deepseek = { id: 'deepseek', translate: openAiChat };
+
+const gemini = {
+  id: 'gemini',
+  async translate({ texts, source, target, config }) {
+    const apiKey = String(config.apiKey || '').trim();
+    if (!apiKey) throw new Error('尚未填写 Gemini API Key');
+    const model = config.model || 'gemini-2.0-flash';
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+    return runAi(async prompt => {
+      const data = await http(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          systemInstruction: { parts: [{ text: 'You are a precise translator. You output only the translation.' }] },
+          contents: [{ role: 'user', parts: [{ text: prompt }] }],
+          generationConfig: { temperature: Number(config.temperature ?? 0.2) }
+        })
+      });
+      const parts = data?.candidates?.[0]?.content?.parts;
+      const content = Array.isArray(parts) ? parts.map(part => part.text || '').join('') : '';
+      if (!content) throw new Error('模型没有返回译文');
+      return content;
+    }, { texts, source, target, config });
+  }
+};
+
+const claude = {
+  id: 'claude',
+  async translate({ texts, source, target, config }) {
+    const apiKey = String(config.apiKey || '').trim();
+    if (!apiKey) throw new Error('尚未填写 Anthropic API Key');
+    return runAi(async prompt => {
+      const data = await http('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': apiKey,
+          'anthropic-version': '2023-06-01',
+          'anthropic-dangerous-direct-browser-access': 'true'
+        },
+        body: JSON.stringify({
+          model: config.model || 'claude-3-5-haiku-latest',
+          max_tokens: 4096,
+          temperature: Number(config.temperature ?? 0.2),
+          system: 'You are a precise translator. You output only the translation.',
+          messages: [{ role: 'user', content: prompt }]
+        })
+      });
+      const content = Array.isArray(data?.content)
+        ? data.content.filter(block => block.type === 'text').map(block => block.text).join('')
+        : '';
+      if (!content) throw new Error('模型没有返回译文');
+      return content;
+    }, { texts, source, target, config });
+  }
+};
+
+// ---------------------------------------------------------------- registry
+
+export const PROVIDERS = { google, mymemory, deepl, microsoft, libre, openai, deepseek, gemini, claude };
+
+export function hasProvider(id) {
+  return Boolean(PROVIDERS[id]);
+}
+
+export async function translateTexts({ engine, texts, source = 'auto', target, config = {} }) {
+  const provider = PROVIDERS[engine];
+  if (!provider) throw new Error(`未知的翻译引擎：${engine}`);
+  if (!Array.isArray(texts) || !texts.length) return [];
+  const output = await provider.translate({ texts, source, target, config });
+  return texts.map((_, index) => String(output[index] ?? ''));
+}

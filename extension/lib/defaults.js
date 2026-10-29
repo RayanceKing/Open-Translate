@@ -1,0 +1,179 @@
+// Shared settings model. Imported by the service worker, options page and popup.
+
+export const APP_VERSION = '0.2.0';
+
+export const LANGUAGES = [
+  { code: 'zh-CN', label: '简体中文' },
+  { code: 'zh-TW', label: '繁體中文' },
+  { code: 'en', label: 'English · 英语' },
+  { code: 'ja', label: '日本語 · 日语' },
+  { code: 'ko', label: '한국어 · 韩语' },
+  { code: 'fr', label: 'Français · 法语' },
+  { code: 'de', label: 'Deutsch · 德语' },
+  { code: 'es', label: 'Español · 西班牙语' },
+  { code: 'ru', label: 'Русский · 俄语' },
+  { code: 'pt', label: 'Português · 葡萄牙语' },
+  { code: 'it', label: 'Italiano · 意大利语' },
+  { code: 'nl', label: 'Nederlands · 荷兰语' },
+  { code: 'pl', label: 'Polski · 波兰语' },
+  { code: 'tr', label: 'Türkçe · 土耳其语' },
+  { code: 'ar', label: 'العربية · 阿拉伯语' },
+  { code: 'hi', label: 'हिन्दी · 印地语' },
+  { code: 'th', label: 'ไทย · 泰语' },
+  { code: 'vi', label: 'Tiếng Việt · 越南语' },
+  { code: 'id', label: 'Bahasa Indonesia · 印尼语' },
+  { code: 'uk', label: 'Українська · 乌克兰语' }
+];
+
+export const LANG_LABEL = Object.fromEntries(LANGUAGES.map(item => [item.code, item.label]));
+
+export const DISPLAY_MODES = [
+  { id: 'bilingual', name: '双语对照', desc: '原文在上，译文紧随其后，最常用的阅读方式' },
+  { id: 'translation', name: '仅译文', desc: '隐藏原文，只显示译文，适合快速浏览' },
+  { id: 'hover', name: '悬停显示', desc: '译文默认隐藏，鼠标移到原文上才浮现' }
+];
+
+export const STYLE_PRESETS = [
+  { id: 'plain', name: '无样式', desc: '只插入译文，不加任何装饰' },
+  { id: 'underline', name: '虚线下划线', desc: '译文下方一条虚线，最接近沉浸式默认' },
+  { id: 'divider', name: '左侧竖线', desc: '左侧细线分隔，长文阅读不累眼' },
+  { id: 'card', name: '卡片', desc: '浅色背景加圆角，层次分明' },
+  { id: 'quote', name: '引用块', desc: '左侧粗线加缩进，像引文一样' },
+  { id: 'highlight', name: '高亮', desc: '背景高亮，扫读时更容易抓住重点' },
+  { id: 'faded', name: '淡色文字', desc: '降低对比度，让原文保持主导' },
+  { id: 'blur', name: '模糊', desc: '译文默认模糊，鼠标悬停才清晰' }
+];
+
+export const DEFAULT_PROMPT = [
+  'You are a professional translator. Translate the text into {{target}}.',
+  'Rules:',
+  '1. Output only the translation. No explanations, no notes, no surrounding quotes.',
+  '2. Preserve the original paragraph breaks, markdown, links, numbers, code and proper nouns.',
+  '3. Keep the tone natural and idiomatic for native readers.'
+].join('\n');
+
+export const DEFAULT_SETTINGS = {
+  version: APP_VERSION,
+  engine: 'google',
+  sourceLanguage: 'auto',
+  targetLanguage: 'zh-CN',
+  displayMode: 'bilingual',
+  autoTranslate: false,
+  batchSize: 4,
+  concurrency: 2,
+  privacy: {
+    maskSensitive: true
+  },
+  style: {
+    preset: 'underline',
+    fontSize: 100,
+    lineHeight: 1.7,
+    fontWeight: 400,
+    opacity: 100,
+    colorMode: 'inherit',
+    color: '#3f3f46',
+    accent: '#6d5dfc',
+    background: '#6d5dfc',
+    radius: 6,
+    paddingX: 8,
+    paddingY: 2,
+    marginTop: 4,
+    marginBottom: 12
+  },
+  engines: {
+    google: {},
+    mymemory: {},
+    deepl: { key: '', pro: false },
+    microsoft: { key: '', region: 'global' },
+    libre: { url: '', key: '' },
+    openai: { baseUrl: 'https://api.openai.com/v1', apiKey: '', model: 'gpt-4o-mini' },
+    deepseek: { baseUrl: 'https://api.deepseek.com/v1', apiKey: '', model: 'deepseek-chat' },
+    gemini: { apiKey: '', model: 'gemini-2.0-flash' },
+    claude: { apiKey: '', model: 'claude-3-5-haiku-latest' }
+  },
+  ai: {
+    prompt: DEFAULT_PROMPT,
+    glossary: '',
+    temperature: 0.2
+  },
+  shortcuts: {
+    toggle: 'Alt+T',
+    selection: 'Alt+Shift+T'
+  },
+  siteRules: {
+    blacklist: [],
+    alwaysTranslate: []
+  },
+  ui: {
+    showFloatingButton: true,
+    theme: 'auto',
+    dock: { side: 'right', top: 0.68 }
+  }
+};
+
+export const AI_ENGINES = ['openai', 'deepseek', 'gemini', 'claude'];
+
+const isPlainObject = value => !!value && typeof value === 'object' && !Array.isArray(value);
+
+export function mergeSettings(base, patch) {
+  if (!isPlainObject(patch)) return structuredClone(base);
+  const output = structuredClone(base);
+  for (const [key, value] of Object.entries(patch)) {
+    if (isPlainObject(value) && isPlainObject(output[key])) output[key] = mergeSettings(output[key], value);
+    else if (value !== undefined) output[key] = value;
+  }
+  return output;
+}
+
+/** Fill in anything missing from a stored (possibly older) settings object. */
+export function normalizeSettings(raw) {
+  const settings = mergeSettings(DEFAULT_SETTINGS, raw || {});
+  settings.version = APP_VERSION;
+  if (!DISPLAY_MODES.some(mode => mode.id === settings.displayMode)) settings.displayMode = 'bilingual';
+  if (!STYLE_PRESETS.some(preset => preset.id === settings.style.preset)) settings.style.preset = 'underline';
+  settings.batchSize = clamp(Number(settings.batchSize) || 4, 1, 10);
+  settings.concurrency = clamp(Number(settings.concurrency) || 2, 1, 5);
+  settings.style.fontSize = clamp(Number(settings.style.fontSize) || 100, 60, 200);
+  settings.style.opacity = clamp(Number(settings.style.opacity) || 100, 20, 100);
+  settings.style.lineHeight = clamp(Number(settings.style.lineHeight) || 1.7, 1, 2.6);
+  settings.siteRules.blacklist = toList(settings.siteRules.blacklist);
+  settings.siteRules.alwaysTranslate = toList(settings.siteRules.alwaysTranslate);
+  return settings;
+}
+
+export function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
+
+export function toList(value) {
+  const source = Array.isArray(value) ? value : String(value || '').split(/[\n,]/);
+  return [...new Set(source.map(item => String(item).trim().toLowerCase()).filter(Boolean))];
+}
+
+/** Style object -> CSS custom properties applied on <html>. */
+export function styleToVars(style) {
+  const background = style.background || '#6d5dfc';
+  return {
+    '--ot-fs': String(style.fontSize / 100),
+    '--ot-lh': String(style.lineHeight),
+    '--ot-fw': String(style.fontWeight),
+    '--ot-op': String(style.opacity / 100),
+    '--ot-color': style.colorMode === 'custom' ? style.color : 'inherit',
+    '--ot-accent': style.accent,
+    '--ot-accent-soft': hexToRgba(background, 0.1),
+    '--ot-accent-line': hexToRgba(background, 0.32),
+    '--ot-bg': hexToRgba(background, 0.1),
+    '--ot-radius': `${style.radius}px`,
+    '--ot-px': `${style.paddingX}px`,
+    '--ot-py': `${style.paddingY}px`,
+    '--ot-mt': `${style.marginTop}px`,
+    '--ot-mb': `${style.marginBottom}px`
+  };
+}
+
+export function hexToRgba(hex, alpha) {
+  const match = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(String(hex).trim());
+  if (!match) return `rgba(109, 93, 252, ${alpha})`;
+  const [r, g, b] = match.slice(1).map(part => parseInt(part, 16));
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}

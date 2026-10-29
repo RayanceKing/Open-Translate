@@ -1,1 +1,249 @@
-.ot-translation{margin:.35em 0 1em;padding:.45em .7em;border-left:3px solid #6d5dfc;background:rgba(109,93,252,.08);color:inherit;font:inherit;line-height:1.65;opacity:.9}.ot-translation.ot-error{border-color:#d33;color:#b42318}
+/* Injected translation surface. All colors come from CSS variables that the
+   content script writes onto <html>, so settings changes apply instantly. */
+
+.ot-translation {
+  display: inline-block;
+  max-width: 100%;
+  font-family: inherit;
+  font-size: calc(1em * var(--ot-fs, 1));
+  font-weight: var(--ot-fw, 400);
+  line-height: var(--ot-lh, 1.7);
+  letter-spacing: normal;
+  text-align: inherit;
+  text-indent: 0;
+  text-transform: none;
+  color: var(--ot-color, inherit);
+  opacity: var(--ot-op, 1);
+  margin: var(--ot-mt, 4px) 0 var(--ot-mb, 12px);
+  padding: var(--ot-py, 2px) var(--ot-px, 8px);
+  border-radius: var(--ot-radius, 6px);
+  background: transparent;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  word-break: break-word;
+  transition: background-color 0.15s ease, filter 0.18s ease;
+}
+
+/* ---------- presets ---------- */
+
+html.ot-preset-underline .ot-translation {
+  padding-bottom: 3px;
+  border-bottom: 1px dashed var(--ot-accent-line, rgba(109, 93, 252, 0.35));
+}
+
+html.ot-preset-divider .ot-translation {
+  padding-left: 10px;
+  border-left: 2px solid var(--ot-accent-line, rgba(109, 93, 252, 0.35));
+}
+
+html.ot-preset-card .ot-translation {
+  padding: 10px 12px;
+  background: var(--ot-bg, rgba(109, 93, 252, 0.1));
+  border: 1px solid var(--ot-accent-line, rgba(109, 93, 252, 0.32));
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+html.ot-preset-quote .ot-translation {
+  padding: 6px 12px;
+  border-left: 4px solid var(--ot-accent, #6d5dfc);
+  background: var(--ot-bg, rgba(109, 93, 252, 0.1));
+}
+
+html.ot-preset-highlight .ot-translation {
+  padding: 4px 8px;
+  background: var(--ot-bg, rgba(109, 93, 252, 0.1));
+}
+
+html.ot-preset-faded .ot-translation {
+  opacity: calc(var(--ot-op, 1) * 0.68);
+}
+
+html.ot-preset-blur .ot-translation {
+  filter: blur(4px);
+}
+
+html.ot-preset-blur .ot-translation:hover,
+html.ot-preset-blur .ot-translation:focus-within {
+  filter: none;
+}
+
+/* ---------- display modes ---------- */
+
+.ot-hover-hidden {
+  display: none !important;
+}
+
+.ot-hover-visible {
+  display: inline-block !important;
+}
+
+.ot-pending {
+  opacity: calc(var(--ot-op, 1) * 0.55);
+  font-style: italic;
+}
+
+.ot-error {
+  color: #d92d20 !important;
+  border-color: rgba(217, 45, 32, 0.45) !important;
+  background: rgba(217, 45, 32, 0.08) !important;
+  font-style: normal;
+}
+
+/* ---------- floating dock (Immersive Translate style) ---------- */
+
+.ot-dock {
+  position: fixed;
+  z-index: 2147483647;
+  width: 44px;
+  height: 44px;
+  font: 13px/1.2 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+.ot-dock.is-snapping {
+  transition: left 0.24s cubic-bezier(0.22, 0.61, 0.36, 1), top 0.24s ease;
+}
+
+.ot-ball {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: linear-gradient(140deg, #7d6dff, #5b4ae8);
+  color: #fff;
+  font: 600 13px/1 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  letter-spacing: 0.02em;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28);
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+  transition: background 0.2s ease, transform 0.15s ease, box-shadow 0.2s ease;
+}
+
+.ot-ball:hover {
+  transform: scale(1.06);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.34);
+}
+
+.ot-dock.is-dragging .ot-ball {
+  cursor: grabbing;
+  transform: scale(1.04);
+}
+
+.ot-dock.is-active .ot-ball {
+  background: linear-gradient(140deg, #4a4763, #2f2d42);
+}
+
+.ot-dock.is-dragging .ot-menu {
+  display: none;
+}
+
+.ot-menu {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  border-radius: 999px;
+  background: rgba(24, 24, 32, 0.95);
+  box-shadow: 0 8px 26px rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(8px);
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.16s ease;
+}
+
+.ot-dock[data-side='right'] .ot-menu {
+  right: calc(100% + 8px);
+}
+
+.ot-dock[data-side='left'] .ot-menu {
+  left: calc(100% + 8px);
+}
+
+.ot-dock:hover .ot-menu,
+.ot-dock.is-open .ot-menu {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.ot-menu button {
+  border: 0;
+  border-radius: 999px;
+  padding: 7px 11px;
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+  font: inherit;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.ot-menu button:hover {
+  background: rgba(255, 255, 255, 0.22);
+}
+
+.ot-menu .ot-main {
+  background: #6d5dfc;
+  font-weight: 600;
+}
+
+.ot-dock.is-active .ot-menu .ot-main {
+  background: #3b3557;
+}
+
+.ot-menu .ot-engine {
+  max-width: 96px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 12px;
+}
+
+.ot-menu .ot-gear {
+  padding: 7px 9px;
+  color: rgba(255, 255, 255, 0.72);
+}
+
+/* ---------- selection bubble ---------- */
+
+.ot-bubble {
+  position: absolute;
+  z-index: 2147483647;
+  max-width: 340px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #1b1b24;
+  color: #f4f4f5;
+  box-shadow: 0 12px 34px rgba(0, 0, 0, 0.34);
+  font: 14px/1.6 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+
+.ot-bubble.ot-error {
+  color: #ffb4ab !important;
+  background: #2a1616 !important;
+}
+
+/* ---------- toast ---------- */
+
+.ot-toast {
+  position: fixed;
+  top: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2147483647;
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: rgba(24, 24, 32, 0.92);
+  color: #fff;
+  font: 13px/1.4 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
+}
