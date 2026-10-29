@@ -354,12 +354,17 @@
     };
   }
 
+  function dockHeight() {
+    return dock ? dock.offsetHeight || 82 : 82;
+  }
+
   function applyDockPosition() {
     if (!dock) return;
     const { side, top } = dockPosition();
+    const height = dockHeight();
     dock.dataset.side = side;
-    dock.style.top = `${clamp(top * window.innerHeight, 70, window.innerHeight - 70)}px`;
     dock.style.left = `${side === 'left' ? 10 : window.innerWidth - 54}px`;
+    dock.style.top = `${clamp(top * window.innerHeight - height / 2, 8, window.innerHeight - height - 8)}px`;
   }
 
   function persistDock() {
@@ -396,8 +401,9 @@
       if (!dragging) return;
       if (!moved && Math.hypot(event.clientX - startX, event.clientY - startY) < 4) return;
       moved = true;
+      const height = dockHeight();
       dock.style.left = `${clamp(event.clientX - grabX, 6, window.innerWidth - 50)}px`;
-      dock.style.top = `${clamp(event.clientY - grabY, 6, window.innerHeight - 50)}px`;
+      dock.style.top = `${clamp(event.clientY - grabY, 6, window.innerHeight - height - 6)}px`;
     });
 
     const release = () => {
@@ -406,13 +412,14 @@
       dock.classList.remove('is-dragging');
       if (!moved) return;
       const rect = dock.getBoundingClientRect();
+      const height = rect.height;
       const side = rect.left + rect.width / 2 < window.innerWidth / 2 ? 'left' : 'right';
-      const top = clamp((rect.top + rect.height / 2) / window.innerHeight, 0.08, 0.92);
+      const top = clamp((rect.top + height / 2) / window.innerHeight, 0.08, 0.92);
       settings.ui.dock = { side, top };
       dock.dataset.side = side;
       dock.classList.add('is-snapping');
       dock.style.left = `${side === 'left' ? 10 : window.innerWidth - 54}px`;
-      dock.style.top = `${clamp(top * window.innerHeight, 70, window.innerHeight - 70)}px`;
+      dock.style.top = `${clamp(top * window.innerHeight - height / 2, 8, window.innerHeight - height - 8)}px`;
       setTimeout(() => dock?.classList.remove('is-snapping'), 280);
       persistDock();
       suppressClick = true;
@@ -430,22 +437,19 @@
       toggle();
     });
 
-    dock.querySelector('.ot-main').addEventListener('click', toggle);
-    dock.querySelector('.ot-engine').addEventListener('click', openOptions);
     dock.querySelector('.ot-gear').addEventListener('click', openOptions);
-
     window.addEventListener('resize', () => applyDockPosition());
   }
 
   function updateDock() {
     if (!dock) return;
     const ball = dock.querySelector('.ot-ball');
+    const gear = dock.querySelector('.ot-gear');
     dock.classList.toggle('is-active', active);
     ball.textContent = active ? '还原' : '翻译';
     ball.setAttribute('aria-label', active ? '还原原文' : '翻译此页');
     ball.title = active ? '还原原文' : '翻译此页';
-    dock.querySelector('.ot-main').textContent = active ? '还原原文' : '翻译此页';
-    dock.querySelector('.ot-engine').textContent = ENGINE_SHORT[settings.engine] || settings.engine;
+    gear.title = `设置 · 当前引擎：${ENGINE_SHORT[settings.engine] || settings.engine}`;
   }
 
   function renderDock() {
@@ -458,12 +462,8 @@
       dock = document.createElement('div');
       dock.className = 'ot-dock';
       dock.innerHTML =
-        '<button class="ot-ball" type="button"></button>' +
-        '<div class="ot-menu">' +
-        '<button class="ot-main" type="button"></button>' +
-        '<button class="ot-engine" type="button" title="翻译引擎，点击打开设置"></button>' +
-        '<button class="ot-gear" type="button" title="设置">⚙</button>' +
-        '</div>';
+        '<button class="ot-gear" type="button" aria-label="设置">⚙</button>' +
+        '<button class="ot-ball" type="button"></button>';
       document.body.append(dock);
       bindDock();
       applyDockPosition();

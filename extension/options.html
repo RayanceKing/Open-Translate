@@ -367,6 +367,19 @@
         </div>
       </div>
 
+      <div class="card">
+        <div class="row">
+          <div class="row-label">
+            <label>翻译缓存</label>
+            <p>翻译过的段落会暂存在浏览器会话内存里，刷新页面、切换标签页或后台从休眠中唤醒都无需重新请求。缓存不写入磁盘，关闭浏览器即清空，条目最多保留 12 小时。缓存只保存译文，不保存原文。</p>
+          </div>
+          <div class="row-control">
+            <span class="pill" id="cache-count">统计中…</span>
+            <button class="ghost" id="clear-cache" type="button">清空缓存</button>
+          </div>
+        </div>
+      </div>
+
       <div class="card note-card">
         <div class="card-title">这些数据会去哪里？</div>
         <ul class="bullets">

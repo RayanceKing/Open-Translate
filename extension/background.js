@@ -2,13 +2,12 @@ import { loadSettings } from './lib/store.js';
 import { translateTexts } from './lib/engines.js';
 import { maskAll } from './lib/privacy.js';
 import { AI_ENGINES } from './lib/defaults.js';
+import { cacheKey, readCache, writeCache, clearCache, cacheStats } from './lib/cache.js';
 
-const CACHE_LIMIT = 1000;
-const cache = new Map();
-
-function remember(key, value) {
-  if (cache.size >= CACHE_LIMIT) cache.delete(cache.keys().next().value);
-  cache.set(key, value);
+/** Anything that changes the meaning of a translation without changing the text. */
+function promptSalt(settings, engine) {
+  if (!AI_ENGINES.includes(engine)) return '';
+  return `${settings.ai.prompt || ''}\u0000${settings.ai.glossary || ''}\u0000${settings.ai.temperature}`;
 }
 
 async function handleTranslate({ texts = [], engine, source, target }) {
@@ -22,25 +21,29 @@ async function handleTranslate({ texts = [], engine, source, target }) {
     config.glossary = settings.ai.glossary || '';
     config.temperature = settings.ai.temperature;
   }
-  const cacheKey = text => `${useEngine}|${to}|${text}`;
+  const salt = promptSalt(settings, useEngine);
+  const keys = texts.map(text => cacheKey({ engine: useEngine, target: to, source: from, salt, text }));
+  const hits = await readCache(keys);
 
   const results = new Array(texts.length);
   const pending = [];
   texts.forEach((text, index) => {
-    const hit = cache.get(cacheKey(text));
+    const hit = hits.get(keys[index]);
     if (hit !== undefined) results[index] = hit;
-    else pending.push({ text, index });
+    else pending.push({ text, index, key: keys[index] });
   });
 
   if (pending.length) {
     const guard = settings.privacy.maskSensitive ? maskAll(pending.map(item => item.text)) : null;
     const payload = guard ? guard.safe : pending.map(item => item.text);
     const translated = await translateTexts({ engine: useEngine, texts: payload, source: from, target: to, config });
+    const fresh = [];
     translated.forEach((value, index) => {
       const text = guard ? guard.restore(value) : value;
       results[pending[index].index] = text;
-      remember(cacheKey(pending[index].text), text);
+      if (text) fresh.push([pending[index].key, text]);
     });
+    writeCache(fresh);
   }
 
   return results;
@@ -74,6 +77,14 @@ chrome.runtime.onMessage.addListener((message, _sender, respond) => {
   }
   if (message?.type === 'test-engine') {
     handleTest(message).then(text => respond({ text })).catch(fail);
+    return true;
+  }
+  if (message?.type === 'cache-stats') {
+    cacheStats().then(stats => respond(stats)).catch(fail);
+    return true;
+  }
+  if (message?.type === 'clear-cache') {
+    clearCache().then(() => respond({ ok: true })).catch(fail);
     return true;
   }
   if (message?.type === 'open-options') {

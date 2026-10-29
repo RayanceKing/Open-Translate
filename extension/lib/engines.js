@@ -119,17 +119,121 @@ const deepl = {
   }
 };
 
+// Microsoft Translator ships two channels:
+//   free  — the same public endpoint the Bing translator page uses (token + key
+//           scraped from the page, valid for a while, no account needed)
+//   azure — the official Cognitive Services API, requires a subscription key
+// The free channel is the default, matching what Immersive Translate does.
+
+let bingCredentials = null;
+
+// Bing's ttranslatev3 endpoint rejects requests without a browser-like
+// User-Agent (HTTP 401 {"ShowCaptcha":false}). Browsers set it themselves and
+// silently ignore the header here, so this only matters for non-browser
+// callers such as Node during development.
+const BROWSER_HEADERS = {
+  'User-Agent':
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+  'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8'
+};
+
+async function fetchBingCredentials(force = false) {
+  const fresh = bingCredentials && Date.now() - bingCredentials.at < 8 * 60 * 1000;
+  if (!force && fresh) return bingCredentials;
+
+  const response = await fetch('https://www.bing.com/translator', {
+    headers: { Accept: 'text/html,application/xhtml+xml', ...BROWSER_HEADERS },
+    credentials: 'include',
+    redirect: 'follow'
+  });
+  if (!response.ok) throw new Error(`微软免费通道不可用（HTTP ${response.status}）`);
+  const html = await response.text();
+  const ig = /IG:"([0-9A-Fa-f]+)"/.exec(html);
+  const iid = /data-iid="([^"]+)"/.exec(html);
+  const abuse = /params_AbusePreventionHelper\s*=\s*\[\s*(\d+)\s*,\s*"([^"]+)"\s*,\s*(\d+)/.exec(html);
+  if (!ig || !abuse) throw new Error('微软免费通道返回了无法识别的页面，请在设置中改用 Azure 密钥');
+
+  bingCredentials = {
+    host: new URL(response.url || 'https://www.bing.com/translator').origin,
+    ig: ig[1],
+    iid: iid?.[1] || 'translator.5023',
+    key: abuse[1],
+    token: abuse[2],
+    at: Date.now()
+  };
+  return bingCredentials;
+}
+
+async function bingTranslateOne(text, to, credentials) {
+  const body = new URLSearchParams({
+    fromLang: 'auto-detect',
+    to,
+    text: text.slice(0, 4000),
+    token: credentials.token,
+    key: credentials.key
+  });
+  const response = await fetch(
+    `${credentials.host}/ttranslatev3?isVertical=1&IG=${credentials.ig}&IID=${credentials.iid}`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        Referer: `${credentials.host}/translator`,
+        ...BROWSER_HEADERS
+      },
+      credentials: 'include',
+      body
+    }
+  );
+  const raw = await response.text();
+  let data = null;
+  try {
+    data = JSON.parse(raw);
+  } catch {
+    data = null;
+  }
+  if (response.status === 401 || response.status === 403) {
+    const error = new Error('微软免费通道凭证已过期');
+    error.retryable = true;
+    throw error;
+  }
+  if (!response.ok || !Array.isArray(data)) throw new Error(`微软免费通道返回错误（HTTP ${response.status}）`);
+  const result = data?.[0]?.translations?.[0]?.text;
+  if (!result) throw new Error('微软免费通道没有返回译文');
+  return result;
+}
+
+async function microsoftFree(texts, target) {
+  const to = msLang(target);
+  const run = async credentials => {
+    const output = [];
+    for (const text of texts) output.push(await bingTranslateOne(text, to, credentials));
+    return output;
+  };
+  try {
+    return await run(await fetchBingCredentials());
+  } catch (error) {
+    if (!error.retryable) throw error;
+    bingCredentials = null;
+    return run(await fetchBingCredentials(true));
+  }
+}
+
+async function microsoftAzure(texts, target, config) {
+  const key = String(config.key || '').trim();
+  if (!key) throw new Error('尚未填写 Azure 订阅密钥，或关闭「使用 Azure 密钥」改用免费通道');
+  const url = `https://api.cognitive.microsofttranslator.com/translate?api-version=3.0&to=${encodeURIComponent(msLang(target))}`;
+  const headers = { 'Content-Type': 'application/json', 'Ocp-Apim-Subscription-Key': key };
+  if (config.region && config.region !== 'global') headers['Ocp-Apim-Subscription-Region'] = config.region;
+  const data = await http(url, { method: 'POST', headers, body: JSON.stringify(texts.map(text => ({ Text: text }))) });
+  if (!Array.isArray(data) || data.length !== texts.length) throw new Error('Microsoft 翻译返回的译文数量不匹配');
+  return data.map(item => item?.translations?.[0]?.text || '');
+}
+
 const microsoft = {
   id: 'microsoft',
   async translate({ texts, target, config }) {
-    const key = String(config.key || '').trim();
-    if (!key) throw new Error('尚未填写 Microsoft 翻译订阅密钥');
-    const url = `https://api.cognitive.microsofttranslator.com/translate?api-version=3.0&to=${encodeURIComponent(msLang(target))}`;
-    const headers = { 'Content-Type': 'application/json', 'Ocp-Apim-Subscription-Key': key };
-    if (config.region && config.region !== 'global') headers['Ocp-Apim-Subscription-Region'] = config.region;
-    const data = await http(url, { method: 'POST', headers, body: JSON.stringify(texts.map(text => ({ Text: text }))) });
-    if (!Array.isArray(data) || data.length !== texts.length) throw new Error('Microsoft 翻译返回的译文数量不匹配');
-    return data.map(item => item?.translations?.[0]?.text || '');
+    return config.useKey ? microsoftAzure(texts, target, config) : microsoftFree(texts, target);
   }
 };
 

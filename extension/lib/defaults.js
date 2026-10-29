@@ -84,7 +84,7 @@ export const DEFAULT_SETTINGS = {
     google: {},
     mymemory: {},
     deepl: { key: '', pro: false },
-    microsoft: { key: '', region: 'global' },
+    microsoft: { useKey: false, key: '', region: 'global' },
     libre: { url: '', key: '' },
     openai: { baseUrl: 'https://api.openai.com/v1', apiKey: '', model: 'gpt-4o-mini' },
     deepseek: { baseUrl: 'https://api.deepseek.com/v1', apiKey: '', model: 'deepseek-chat' },
@@ -127,8 +127,17 @@ export function mergeSettings(base, patch) {
 
 /** Fill in anything missing from a stored (possibly older) settings object. */
 export function normalizeSettings(raw) {
+  // Before 0.2.0 Microsoft only had a keyed Azure channel, so a stored key with
+  // no `useKey` flag means the user was on Azure — keep them there instead of
+  // silently switching them to the free channel.
+  const legacyMicrosoftKey =
+    isPlainObject(raw?.engines?.microsoft) &&
+    raw.engines.microsoft.useKey === undefined &&
+    String(raw.engines.microsoft.key || '').trim() !== '';
+
   const settings = mergeSettings(DEFAULT_SETTINGS, raw || {});
   settings.version = APP_VERSION;
+  if (legacyMicrosoftKey) settings.engines.microsoft.useKey = true;
   if (!DISPLAY_MODES.some(mode => mode.id === settings.displayMode)) settings.displayMode = 'bilingual';
   if (!STYLE_PRESETS.some(preset => preset.id === settings.style.preset)) settings.style.preset = 'underline';
   settings.batchSize = clamp(Number(settings.batchSize) || 4, 1, 10);

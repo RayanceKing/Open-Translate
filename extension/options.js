@@ -130,8 +130,10 @@ function renderServices() {
     const config = settings.engines[engine.id] || {};
     const fields = engine.fields
       .map(field => {
+        const depends = field.dependsOn ? ` data-depends="${field.dependsOn}"` : '';
+        const hidden = field.dependsOn && !config[field.dependsOn] ? ' hidden' : '';
         if (field.type === 'switch') {
-          return `<div class="service-field">
+          return `<div class="service-field"${depends}${hidden}>
             <label for="eng-${engine.id}-${field.key}">${field.label}</label>
             <label class="switch">
               <input type="checkbox" id="eng-${engine.id}-${field.key}" data-engine="${engine.id}" data-key="${field.key}" data-kind="switch" ${config[field.key] ? 'checked' : ''}>
@@ -142,7 +144,7 @@ function renderServices() {
         }
         const type = field.type === 'password' ? 'password' : 'text';
         const value = String(config[field.key] ?? '').replace(/"/g, '&quot;');
-        return `<div class="service-field">
+        return `<div class="service-field"${depends}${hidden}>
           <label for="eng-${engine.id}-${field.key}">${field.label}</label>
           <input type="${type}" id="eng-${engine.id}-${field.key}" data-engine="${engine.id}" data-key="${field.key}" value="${value}" placeholder="${field.placeholder || ''}" spellcheck="false" autocomplete="off">
         </div>`;
@@ -189,6 +191,7 @@ function bindServices() {
     const { engine, key, kind } = input.dataset;
     settings.engines[engine] ??= {};
     settings.engines[engine][key] = kind === 'switch' ? input.checked : input.value.trim();
+    if (kind === 'switch') syncServiceDeps(input.closest('[data-service]'));
     scheduleSave();
   });
 
@@ -199,6 +202,14 @@ function bindServices() {
     settings.engines[engine] ??= {};
     settings.engines[engine][key] = input.value.trim();
     scheduleSave();
+  });
+}
+
+function syncServiceDeps(card) {
+  if (!card) return;
+  card.querySelectorAll('[data-depends]').forEach(field => {
+    const toggle = card.querySelector(`[data-engine][data-key="${field.dataset.depends}"]`);
+    field.hidden = !(toggle && toggle.checked);
   });
 }
 
@@ -405,6 +416,37 @@ function bindTransfer() {
   });
 }
 
+// ---------------------------------------------------------------- cache
+
+async function refreshCacheStats() {
+  const label = $('#cache-count');
+  if (!label) return;
+  try {
+    const stats = await chrome.runtime.sendMessage({ type: 'cache-stats' });
+    if (!stats || stats.error) throw new Error(stats?.error || 'unavailable');
+    label.textContent = stats.count ? `${stats.count} 条译文` : '暂无缓存';
+  } catch {
+    label.textContent = '暂不可用';
+  }
+}
+
+function bindCache() {
+  refreshCacheStats();
+  $('#clear-cache').addEventListener('click', async () => {
+    const button = $('#clear-cache');
+    button.disabled = true;
+    try {
+      await chrome.runtime.sendMessage({ type: 'clear-cache' });
+      await refreshCacheStats();
+      toast('翻译缓存已清空');
+    } catch {
+      toast('清空失败，请重新加载扩展');
+    } finally {
+      button.disabled = false;
+    }
+  });
+}
+
 // ---------------------------------------------------------------- navigation
 
 function bindNavigation() {
@@ -442,6 +484,7 @@ async function init() {
   bindShortcutInputs();
   bindTheme();
   bindTransfer();
+  bindCache();
   bindNavigation();
 
   $('#version-label').textContent = `v${APP_VERSION}`;

@@ -29,11 +29,12 @@ export const ENGINE_CATALOG = [
   {
     id: 'microsoft',
     name: 'Microsoft 翻译',
-    tag: '需密钥',
-    note: 'Azure 认知服务，F0 免费层每月 200 万字符，支持批量。',
+    tag: '免费',
+    note: '默认走 Bing 翻译页使用的公开通道，无需密钥即可使用。遇到限流或需要更高配额时，可开启下方开关改用你自己的 Azure 订阅。',
     fields: [
-      { key: 'key', label: '订阅密钥', type: 'password', placeholder: 'Azure Translator Key' },
-      { key: 'region', label: '区域', type: 'text', placeholder: 'global / eastasia' }
+      { key: 'useKey', label: '使用 Azure 密钥', type: 'switch', hint: '关闭时使用免费通道' },
+      { key: 'key', label: '订阅密钥', type: 'password', placeholder: 'Azure Translator Key', dependsOn: 'useKey' },
+      { key: 'region', label: '区域', type: 'text', placeholder: 'global / eastasia', dependsOn: 'useKey' }
     ]
   },
   {

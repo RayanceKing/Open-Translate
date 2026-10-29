@@ -89,18 +89,47 @@ html.ot-preset-blur .ot-translation:focus-within {
   font-style: normal;
 }
 
-/* ---------- floating dock (Immersive Translate style) ---------- */
+/* ---------- floating dock: settings above, translate below ---------- */
 
 .ot-dock {
   position: fixed;
   z-index: 2147483647;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
   width: 44px;
-  height: 44px;
   font: 13px/1.2 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 }
 
 .ot-dock.is-snapping {
   transition: left 0.24s cubic-bezier(0.22, 0.61, 0.36, 1), top 0.24s ease;
+}
+
+.ot-gear {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(24, 24, 32, 0.9);
+  color: rgba(255, 255, 255, 0.88);
+  font-size: 15px;
+  line-height: 1;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.24);
+  backdrop-filter: blur(6px);
+  opacity: 0.85;
+  cursor: pointer;
+  transition: opacity 0.15s ease, transform 0.15s ease, background 0.15s ease;
+}
+
+.ot-gear:hover {
+  opacity: 1;
+  transform: scale(1.08);
+  background: #2a2a38;
 }
 
 .ot-ball {
@@ -135,80 +164,6 @@ html.ot-preset-blur .ot-translation:focus-within {
 
 .ot-dock.is-active .ot-ball {
   background: linear-gradient(140deg, #4a4763, #2f2d42);
-}
-
-.ot-dock.is-dragging .ot-menu {
-  display: none;
-}
-
-.ot-menu {
-  position: absolute;
-  top: 50%;
-  transform: translateY(-50%);
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  padding: 4px;
-  border-radius: 999px;
-  background: rgba(24, 24, 32, 0.95);
-  box-shadow: 0 8px 26px rgba(0, 0, 0, 0.3);
-  backdrop-filter: blur(8px);
-  white-space: nowrap;
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 0.16s ease;
-}
-
-.ot-dock[data-side='right'] .ot-menu {
-  right: calc(100% + 8px);
-}
-
-.ot-dock[data-side='left'] .ot-menu {
-  left: calc(100% + 8px);
-}
-
-.ot-dock:hover .ot-menu,
-.ot-dock.is-open .ot-menu {
-  opacity: 1;
-  pointer-events: auto;
-}
-
-.ot-menu button {
-  border: 0;
-  border-radius: 999px;
-  padding: 7px 11px;
-  background: rgba(255, 255, 255, 0.1);
-  color: #fff;
-  font: inherit;
-  cursor: pointer;
-  transition: background 0.15s ease;
-}
-
-.ot-menu button:hover {
-  background: rgba(255, 255, 255, 0.22);
-}
-
-.ot-menu .ot-main {
-  background: #6d5dfc;
-  font-weight: 600;
-}
-
-.ot-dock.is-active .ot-menu .ot-main {
-  background: #3b3557;
-}
-
-.ot-menu .ot-engine {
-  max-width: 96px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: rgba(255, 255, 255, 0.72);
-  font-size: 12px;
-}
-
-.ot-menu .ot-gear {
-  padding: 7px 9px;
-  color: rgba(255, 255, 255, 0.72);
 }
 
 /* ---------- selection bubble ---------- */

@@ -747,6 +747,10 @@ output {
   gap: 12px;
 }
 
+.service-field[hidden] {
+  display: none;
+}
+
 .service-field > label {
   flex: 0 0 96px;
   font-size: 12.5px;

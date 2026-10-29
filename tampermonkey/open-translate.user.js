@@ -19,6 +19,8 @@
 // @connect      api.deepseek.com
 // @connect      generativelanguage.googleapis.com
 // @connect      api.anthropic.com
+// @connect      www.bing.com
+// @connect      cn.bing.com
 // @connect      *
 // @run-at       document-idle
 // ==/UserScript==
@@ -65,8 +67,9 @@
       { key: 'pro', label: '使用 Pro 端点', type: 'switch' }
     ],
     microsoft: [
-      { key: 'key', label: '订阅密钥', type: 'password' },
-      { key: 'region', label: '区域', type: 'text', placeholder: 'global' }
+      { key: 'useKey', label: '使用 Azure 密钥', type: 'switch' },
+      { key: 'key', label: '订阅密钥', type: 'password', dependsOn: 'useKey' },
+      { key: 'region', label: '区域', type: 'text', placeholder: 'global', dependsOn: 'useKey' }
     ],
     libre: [
       { key: 'url', label: '实例地址', type: 'text', placeholder: 'https://libretranslate.example.com' },
@@ -125,7 +128,7 @@
     engines: {
       google: {}, mymemory: {},
       deepl: { key: '', pro: false },
-      microsoft: { key: '', region: 'global' },
+      microsoft: { useKey: false, key: '', region: 'global' },
       libre: { url: '', key: '' },
       openai: { baseUrl: 'https://api.openai.com/v1', apiKey: '', model: 'gpt-4o-mini' },
       deepseek: { baseUrl: 'https://api.deepseek.com/v1', apiKey: '', model: 'deepseek-chat' },
@@ -165,8 +168,20 @@
     } catch {
       stored = null;
     }
+    let saved = null;
+    try {
+      saved = typeof stored === 'string' ? JSON.parse(stored) : stored;
+    } catch {
+      saved = null;
+    }
     const next = structuredClone(DEFAULTS);
-    if (stored) deepMerge(next, typeof stored === 'string' ? JSON.parse(stored) : stored);
+    if (saved) deepMerge(next, saved);
+    // Before 0.2.0 Microsoft only had a keyed Azure channel, so a stored key
+    // with no `useKey` flag means the user was on Azure — keep them there.
+    const legacy = saved && saved.engines && saved.engines.microsoft;
+    if (legacy && legacy.useKey === undefined && String(legacy.key || '').trim()) {
+      next.engines.microsoft.useKey = true;
+    }
     return next;
   }
 
@@ -296,6 +311,92 @@
     return output;
   }
 
+  // Microsoft: free channel (same public endpoint the Bing translator page uses)
+  // by default, official Azure API when a subscription key is configured.
+  let bingCredsCache = null;
+
+  function httpText(url, headers = {}) {
+    return new Promise((resolve, reject) => {
+      GM_xmlhttpRequest({
+        method: 'GET',
+        url,
+        headers,
+        timeout: 20000,
+        onload: response => {
+          if (response.status < 200 || response.status >= 300) {
+            reject(new Error(`微软免费通道不可用（HTTP ${response.status}）`));
+          } else {
+            resolve({ text: response.responseText, url: response.finalUrl || url });
+          }
+        },
+        onerror: () => reject(new Error('无法连接微软翻译')),
+        ontimeout: () => reject(new Error('微软免费通道请求超时'))
+      });
+    });
+  }
+
+  async function bingCredentials(force = false) {
+    if (!force && bingCredsCache && Date.now() - bingCredsCache.at < 8 * 60 * 1000) return bingCredsCache;
+    const page = await httpText('https://www.bing.com/translator', { Accept: 'text/html' });
+    const ig = /IG:"([0-9A-Fa-f]+)"/.exec(page.text);
+    const iid = /data-iid="([^"]+)"/.exec(page.text);
+    const abuse = /params_AbusePreventionHelper\s*=\s*\[\s*(\d+)\s*,\s*"([^"]+)"\s*,\s*(\d+)/.exec(page.text);
+    if (!ig || !abuse) throw new Error('微软免费通道返回了无法识别的页面，可在引擎设置里改用 Azure 密钥');
+    bingCredsCache = {
+      host: new URL(page.url).origin,
+      ig: ig[1],
+      iid: iid?.[1] || 'translator.5023',
+      key: abuse[1],
+      token: abuse[2],
+      at: Date.now()
+    };
+    return bingCredsCache;
+  }
+
+  async function bingTranslateOne(text, to, credentials) {
+    const body = new URLSearchParams({
+      fromLang: 'auto-detect',
+      to,
+      text: text.slice(0, 4000),
+      token: credentials.token,
+      key: credentials.key
+    }).toString();
+    try {
+      const data = await http({
+        url: `${credentials.host}/ttranslatev3?isVertical=1&IG=${credentials.ig}&IID=${credentials.iid}`,
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        data: body
+      });
+      const result = data?.[0]?.translations?.[0]?.text;
+      if (!result) throw new Error('微软免费通道没有返回译文');
+      return result;
+    } catch (error) {
+      if (/HTTP 40[13]/.test(error.message)) {
+        const expired = new Error('微软免费通道凭证已过期');
+        expired.retryable = true;
+        throw expired;
+      }
+      throw error;
+    }
+  }
+
+  async function microsoftFree(texts, target) {
+    const to = { 'zh-CN': 'zh-Hans', 'zh-TW': 'zh-Hant' }[target] || target;
+    const run = async credentials => {
+      const output = [];
+      for (const text of texts) output.push(await bingTranslateOne(text, to, credentials));
+      return output;
+    };
+    try {
+      return await run(await bingCredentials());
+    } catch (error) {
+      if (!error.retryable) throw error;
+      bingCredsCache = null;
+      return run(await bingCredentials(true));
+    }
+  }
+
   async function translateBatch(texts, target) {
     const engine = settings.engine;
     const cfg = settings.engines[engine] || {};
@@ -336,7 +437,8 @@
     }
 
     if (engine === 'microsoft') {
-      if (!cfg.key) throw new Error('尚未填写 Microsoft 翻译订阅密钥');
+      if (!cfg.useKey) return microsoftFree(texts, target);
+      if (!cfg.key) throw new Error('尚未填写 Azure 订阅密钥，或关闭「使用 Azure 密钥」改用免费通道');
       const msTarget = { 'zh-CN': 'zh-Hans', 'zh-TW': 'zh-Hant' }[target] || target;
       const headers = { 'Content-Type': 'application/json', 'Ocp-Apim-Subscription-Key': cfg.key };
       if (cfg.region && cfg.region !== 'global') headers['Ocp-Apim-Subscription-Region'] = cfg.region;
@@ -437,11 +539,101 @@
     throw new Error(`未知的翻译引擎：${engine}`);
   }
 
+  // ---------------------------------------------------------------- cache
+  // Session-scoped: sessionStorage survives a reload in the same tab but is
+  // dropped when the tab closes, which matches "temporary". Only fingerprints
+  // and translations are stored — never the source text itself.
+
+  const CACHE_STORE = 'ot-cache';
+  const CACHE_TTL = 12 * 60 * 60 * 1000;
+  const CACHE_LIMIT = 2000;
+  let cacheMap = null;
+
+  function cacheEntries() {
+    if (cacheMap) return cacheMap;
+    try {
+      cacheMap = JSON.parse(sessionStorage.getItem(CACHE_STORE) || '{}') || {};
+    } catch {
+      cacheMap = {};
+    }
+    return cacheMap;
+  }
+
+  function cacheFlush() {
+    try {
+      sessionStorage.setItem(CACHE_STORE, JSON.stringify(cacheEntries()));
+    } catch {
+      // Quota exceeded — drop the oldest half and try once more.
+      const keys = Object.keys(cacheEntries());
+      keys.slice(0, Math.ceil(keys.length / 2)).forEach(key => delete cacheEntries()[key]);
+      try {
+        sessionStorage.setItem(CACHE_STORE, JSON.stringify(cacheEntries()));
+      } catch {
+        /* stay memory-only for this page */
+      }
+    }
+  }
+
+  function fingerprint(input) {
+    let a = 0x811c9dc5;
+    let b = 0x01000193;
+    for (let index = 0; index < input.length; index += 1) {
+      const code = input.charCodeAt(index);
+      a = Math.imul(a ^ code, 0x01000193) >>> 0;
+      b = Math.imul(b ^ code, 0x85ebca6b) >>> 0;
+    }
+    return `${a.toString(36)}.${b.toString(36)}`;
+  }
+
+  function cacheKeyFor(text) {
+    const salt = AI_ENGINES.includes(settings.engine)
+      ? `${settings.ai.prompt}\u0000${settings.ai.glossary}\u0000${settings.ai.temperature}`
+      : '';
+    return [settings.engine, settings.targetLanguage, salt ? fingerprint(salt) : '0', fingerprint(String(text))].join('|');
+  }
+
+  function cacheCount() {
+    const now = Date.now();
+    return Object.values(cacheEntries()).filter(entry => entry && typeof entry.v === 'string' && now - entry.t < CACHE_TTL).length;
+  }
+
+  function clearTranslationCache() {
+    cacheMap = {};
+    try {
+      sessionStorage.removeItem(CACHE_STORE);
+    } catch {
+      /* ignore */
+    }
+  }
+
   async function requestTranslation(texts) {
-    const guard = settings.privacy.maskSensitive ? maskAll(texts) : null;
-    const payload = guard ? guard.safe : texts;
-    const output = await translateBatch(payload, settings.targetLanguage);
-    return output.map(value => (guard ? guard.restore(value) : value));
+    const entries = cacheEntries();
+    const now = Date.now();
+    const keys = texts.map(cacheKeyFor);
+    const results = new Array(texts.length);
+    const pending = [];
+
+    texts.forEach((text, index) => {
+      const entry = entries[keys[index]];
+      if (entry && typeof entry.v === 'string' && now - entry.t < CACHE_TTL) results[index] = entry.v;
+      else pending.push({ text, index, key: keys[index] });
+    });
+
+    if (pending.length) {
+      const guard = settings.privacy.maskSensitive ? maskAll(pending.map(item => item.text)) : null;
+      const payload = guard ? guard.safe : pending.map(item => item.text);
+      const output = await translateBatch(payload, settings.targetLanguage);
+      output.forEach((value, index) => {
+        const text = guard ? guard.restore(value) : value;
+        results[pending[index].index] = text;
+        if (text) entries[pending[index].key] = { v: text, t: now };
+      });
+      const stored = Object.keys(entries);
+      if (stored.length > CACHE_LIMIT) stored.slice(0, stored.length - CACHE_LIMIT).forEach(key => delete entries[key]);
+      cacheFlush();
+    }
+
+    return results;
   }
 
   // ---------------------------------------------------------------- appearance
@@ -470,7 +662,7 @@
       '--ot-mb': `${style.marginBottom}px`
     };
     for (const [key, value] of Object.entries(vars)) root.style.setProperty(key, value);
-    if (ui) ui.dock.style.display = settings.ui.showFloatingButton ? 'block' : 'none';
+    if (ui) ui.dock.style.display = settings.ui.showFloatingButton ? 'flex' : 'none';
   }
 
   // ---------------------------------------------------------------- page walking
@@ -659,8 +851,14 @@
   const UI_CSS = `
     :host { all: initial; }
     * { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif; }
-    .dock { position: fixed; width: 44px; height: 44px; z-index: 2147483647; }
+    .dock { position: fixed; display: flex; flex-direction: column; align-items: center; gap: 6px;
+      width: 44px; z-index: 2147483647; }
     .dock.snapping { transition: left .24s cubic-bezier(.22,.61,.36,1), top .24s ease; }
+    .gear { display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; padding: 0;
+      border: 0; border-radius: 50%; background: rgba(24,24,32,.9); color: rgba(255,255,255,.88);
+      font-size: 15px; line-height: 1; box-shadow: 0 4px 12px rgba(0,0,0,.24); backdrop-filter: blur(6px);
+      opacity: .85; cursor: pointer; transition: opacity .15s ease, transform .15s ease, background .15s ease; }
+    .gear:hover { opacity: 1; transform: scale(1.08); background: #2a2a38; }
     .ball { display: flex; align-items: center; justify-content: center; width: 44px; height: 44px; padding: 0;
       border: 0; border-radius: 50%; background: linear-gradient(140deg,#7d6dff,#5b4ae8); color: #fff;
       font: 600 13px/1 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; letter-spacing: .02em;
@@ -669,21 +867,6 @@
     .ball:hover { transform: scale(1.06); box-shadow: 0 8px 22px rgba(0,0,0,.34); }
     .dock.dragging .ball { cursor: grabbing; transform: scale(1.04); }
     .dock.active .ball { background: linear-gradient(140deg,#4a4763,#2f2d42); }
-    .dock.dragging .menu { display: none; }
-    .menu { position: absolute; top: 50%; transform: translateY(-50%); display: flex; align-items: center; gap: 2px;
-      padding: 4px; border-radius: 999px; background: rgba(24,24,32,.95); box-shadow: 0 8px 26px rgba(0,0,0,.3);
-      backdrop-filter: blur(8px); white-space: nowrap; opacity: 0; pointer-events: none; transition: opacity .16s ease; }
-    .dock[data-side="right"] .menu { right: calc(100% + 8px); }
-    .dock[data-side="left"] .menu { left: calc(100% + 8px); }
-    .dock:hover .menu, .dock.open .menu { opacity: 1; pointer-events: auto; }
-    .menu button { border: 0; border-radius: 999px; padding: 7px 11px; background: rgba(255,255,255,.1); color: #fff;
-      font-size: 13px; cursor: pointer; transition: background .15s ease; }
-    .menu button:hover { background: rgba(255,255,255,.22); }
-    .menu .main { background: #6d5dfc; font-weight: 600; }
-    .dock.active .menu .main { background: #3b3557; }
-    .menu .engine { max-width: 96px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-      color: rgba(255,255,255,.72); font-size: 12px; }
-    .menu .gear { padding: 7px 9px; color: rgba(255,255,255,.72); }
     .overlay { position: fixed; inset: 0; background: rgba(12,12,18,.55); display: flex; align-items: center;
       justify-content: center; z-index: 2147483646; backdrop-filter: blur(2px); }
     .dialog { width: min(720px, 92vw); max-height: 84vh; display: flex; flex-direction: column; overflow: hidden;
@@ -701,6 +884,7 @@
     .pane.active { display: block; }
     .field { display: flex; align-items: center; gap: 14px; margin-bottom: 12px; }
     .field.col { display: block; }
+    .field[hidden] { display: none; }
     .field > label:not(.switch) { flex: 0 0 118px; font-size: 13px; color: #6d6e80; }
     .field.col > label { display: block; margin-bottom: 6px; flex: none; }
     .field input[type=text], .field input[type=password], .field select, .field textarea {
@@ -773,12 +957,8 @@
     const dock = document.createElement('div');
     dock.className = 'dock';
     dock.innerHTML =
-      '<button class="ball" type="button"></button>' +
-      '<div class="menu">' +
-      '<button class="main" type="button"></button>' +
-      '<button class="engine" type="button" title="翻译引擎，点击打开设置"></button>' +
-      '<button class="gear" type="button" title="设置">⚙</button>' +
-      '</div>';
+      '<button class="gear" type="button" aria-label="设置">⚙</button>' +
+      '<button class="ball" type="button"></button>';
     shadow.append(dock);
 
     const overlay = document.createElement('div');
@@ -786,8 +966,6 @@
     overlay.style.display = 'none';
     shadow.append(overlay);
 
-    dock.querySelector('.main').addEventListener('click', toggle);
-    dock.querySelector('.engine').addEventListener('click', openSettings);
     dock.querySelector('.gear').addEventListener('click', openSettings);
     overlay.addEventListener('click', event => {
       if (event.target === overlay) overlay.style.display = 'none';
@@ -809,12 +987,15 @@
 
   const clampValue = (value, min, max) => Math.min(max, Math.max(min, value));
 
+  const dockHeight = () => (ui?.dock ? ui.dock.offsetHeight || 80 : 80);
+
   function placeDock() {
     if (!ui) return;
     const { side, top } = dockPosition();
+    const height = dockHeight();
     ui.dock.dataset.side = side;
     ui.dock.style.left = `${side === 'left' ? 10 : window.innerWidth - 54}px`;
-    ui.dock.style.top = `${clampValue(top * window.innerHeight, 70, window.innerHeight - 70)}px`;
+    ui.dock.style.top = `${clampValue(top * window.innerHeight - height / 2, 8, window.innerHeight - height - 8)}px`;
   }
 
   function bindDock() {
@@ -846,8 +1027,9 @@
       if (!dragging) return;
       if (!moved && Math.hypot(event.clientX - startX, event.clientY - startY) < 4) return;
       moved = true;
+      const height = dockHeight();
       ui.dock.style.left = `${clampValue(event.clientX - grabX, 6, window.innerWidth - 50)}px`;
-      ui.dock.style.top = `${clampValue(event.clientY - grabY, 6, window.innerHeight - 50)}px`;
+      ui.dock.style.top = `${clampValue(event.clientY - grabY, 6, window.innerHeight - height - 6)}px`;
     });
 
     const release = () => {
@@ -856,14 +1038,15 @@
       ui.dock.classList.remove('dragging');
       if (!moved) return;
       const rect = ui.dock.getBoundingClientRect();
+      const height = rect.height;
       const side = rect.left + rect.width / 2 < window.innerWidth / 2 ? 'left' : 'right';
-      const top = clampValue((rect.top + rect.height / 2) / window.innerHeight, 0.08, 0.92);
+      const top = clampValue((rect.top + height / 2) / window.innerHeight, 0.08, 0.92);
       settings.ui.dock = { side, top };
       persist();
       ui.dock.dataset.side = side;
       ui.dock.classList.add('snapping');
       ui.dock.style.left = `${side === 'left' ? 10 : window.innerWidth - 54}px`;
-      ui.dock.style.top = `${clampValue(top * window.innerHeight, 70, window.innerHeight - 70)}px`;
+      ui.dock.style.top = `${clampValue(top * window.innerHeight - height / 2, 8, window.innerHeight - height - 8)}px`;
       setTimeout(() => ui.dock.classList.remove('snapping'), 280);
       suppressClick = true;
       setTimeout(() => {
@@ -885,13 +1068,13 @@
   function updatePanel() {
     if (!ui) return;
     const ball = ui.dock.querySelector('.ball');
-    const main = ui.dock.querySelector('.main');
+    const gear = ui.dock.querySelector('.gear');
     ui.dock.classList.toggle('active', active);
     ball.textContent = active ? '还原' : '翻译';
     ball.title = active ? '还原原文' : '翻译此页';
-    main.textContent = active ? '还原原文' : '翻译此页';
-    ui.dock.querySelector('.engine').textContent = ENGINE_SHORT[settings.engine] || settings.engine;
-    ui.dock.style.display = settings.ui.showFloatingButton ? 'block' : 'none';
+    ball.setAttribute('aria-label', active ? '还原原文' : '翻译此页');
+    gear.title = `设置 · 当前引擎：${ENGINE_SHORT[settings.engine] || settings.engine}`;
+    ui.dock.style.display = settings.ui.showFloatingButton ? 'flex' : 'none';
     placeDock();
   }
 
@@ -902,11 +1085,13 @@
 
     const fieldHtml = fields
       .map(field => {
+        const depends = field.dependsOn ? ` data-depends="${field.dependsOn}"` : '';
+        const hidden = field.dependsOn && !config[field.dependsOn] ? ' hidden' : '';
         if (field.type === 'switch') {
-          return `<div class="field"><label>${field.label}</label><label class="switch"><input type="checkbox" data-k="engines.${engine}.${field.key}" ${config[field.key] ? 'checked' : ''}><i></i></label></div>`;
+          return `<div class="field"${depends}${hidden}><label>${field.label}</label><label class="switch"><input type="checkbox" data-k="engines.${engine}.${field.key}" ${config[field.key] ? 'checked' : ''}><i></i></label></div>`;
         }
         const value = String(config[field.key] ?? '').replace(/"/g, '&quot;');
-        return `<div class="field"><label>${field.label}</label><input type="${field.type === 'password' ? 'password' : 'text'}" data-k="engines.${engine}.${field.key}" value="${value}" placeholder="${field.placeholder || ''}" spellcheck="false" autocomplete="off"></div>`;
+        return `<div class="field"${depends}${hidden}><label>${field.label}</label><input type="${field.type === 'password' ? 'password' : 'text'}" data-k="engines.${engine}.${field.key}" value="${value}" placeholder="${field.placeholder || ''}" spellcheck="false" autocomplete="off"></div>`;
       })
       .join('');
 
@@ -937,6 +1122,7 @@
             <div class="field"><label>打开页面自动翻译</label><label class="switch"><input type="checkbox" data-k="autoTranslate" ${settings.autoTranslate ? 'checked' : ''}><i></i></label></div>
             <div class="field"><label>显示悬浮按钮</label><label class="switch"><input type="checkbox" data-k="ui.showFloatingButton" ${settings.ui.showFloatingButton ? 'checked' : ''}><i></i></label></div>
             <div class="field"><label>屏蔽敏感信息</label><label class="switch"><input type="checkbox" data-k="privacy.maskSensitive" ${settings.privacy.maskSensitive ? 'checked' : ''}><i></i></label></div>
+            <div class="field"><label>翻译缓存</label><span data-cache-count style="margin-left:auto;font-size:12px;color:#8b8b9e">${cacheCount()} 条</span><button class="btn" type="button" data-clear-cache>清空</button></div>
             <p class="hint">邮箱、电话与常见 API Token 会在发送前替换为占位符，返回后还原。快捷键：Alt+T 翻译 / 还原，Alt+Shift+T 翻译选中文本。</p>
           </div>
 
@@ -980,6 +1166,13 @@
     `;
 
     bindSettingsUi();
+  }
+
+  function syncFieldDeps() {
+    ui.overlay.querySelectorAll('[data-depends]').forEach(field => {
+      const toggle = ui.overlay.querySelector(`[data-k="engines.${settings.engine}.${field.dataset.depends}"]`);
+      field.hidden = !(toggle && toggle.checked);
+    });
   }
 
   function activateTab(name) {
@@ -1042,6 +1235,13 @@
       tab.addEventListener('click', () => activateTab(tab.dataset.tab));
     });
 
+    root.querySelector('[data-clear-cache]').addEventListener('click', event => {
+      clearTranslationCache();
+      const label = event.currentTarget.closest('.field').querySelector('[data-cache-count]');
+      if (label) label.textContent = '0 条';
+      toast('翻译缓存已清空');
+    });
+
     root.querySelectorAll('.seg button').forEach(button => {
       button.addEventListener('click', () => {
         settings.displayMode = button.dataset.mode;
@@ -1075,6 +1275,8 @@
           updatePanel();
           renderSettings();
           activateTab('engine');
+        } else if (path.startsWith('engines.')) {
+          syncFieldDeps();
         }
         if (path === 'style.fontSize' || path === 'style.lineHeight' || path === 'style.opacity') {
           const label = input.previousElementSibling;
