@@ -13,13 +13,14 @@
       <div class="logo">译</div>
       <div class="brand-text">
         <strong>Open Translate</strong>
-        <span id="version-label">v0.2.0</span>
+        <span id="version-label">v0.3.0</span>
       </div>
     </div>
 
     <nav class="nav" id="nav">
       <a class="nav-item is-active" href="#general" data-target="general">通用</a>
       <a class="nav-item" href="#appearance" data-target="appearance">显示样式</a>
+      <a class="nav-item" href="#subtitles" data-target="subtitles">视频字幕</a>
       <a class="nav-item" href="#services" data-target="services">翻译服务</a>
       <a class="nav-item" href="#ai" data-target="ai">AI 翻译</a>
       <a class="nav-item" href="#privacy" data-target="privacy">隐私与安全</a>
@@ -299,6 +300,77 @@
       </div>
     </section>
 
+    <!-- ============================ 视频字幕 ============================ -->
+    <section class="section" id="subtitles">
+      <div class="section-head">
+        <h2>视频字幕</h2>
+        <p>为网页视频加载双语字幕：自动读取 YouTube 的字幕轨或页面里的 <code>&lt;track&gt;</code>，按播放进度实时显示原文与译文。</p>
+      </div>
+
+      <div class="card">
+        <div class="row">
+          <div class="row-label">
+            <label for="subtitles-enabled">启用双语字幕</label>
+            <p>视频开始播放时自动加载字幕轨。单个页面上可以用快捷键临时开关。</p>
+          </div>
+          <div class="row-control">
+            <label class="switch">
+              <input type="checkbox" id="subtitles-enabled" data-path="subtitles.enabled">
+              <span class="slider"></span>
+            </label>
+          </div>
+        </div>
+
+        <div class="row column">
+          <div class="row-label"><label>字幕显示方式</label></div>
+          <div class="radio-grid" id="subtitle-modes"></div>
+        </div>
+
+        <div class="row">
+          <div class="row-label"><label for="subtitle-fontSize">字幕字号</label><p>相对视频内嵌字幕的百分比。</p></div>
+          <div class="row-control slider-control">
+            <input type="range" id="subtitle-fontSize" data-path="subtitles.fontSize" min="60" max="200" step="5">
+            <output data-for="subtitles.fontSize">100%</output>
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="row-label"><label for="subtitle-position">距底部位置</label><p>字幕底边离视频底部的距离，按视频高度百分比计算。</p></div>
+          <div class="row-control slider-control">
+            <input type="range" id="subtitle-position" data-path="subtitles.position" min="2" max="45" step="1">
+            <output data-for="subtitles.position">10%</output>
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="row-label"><label for="subtitle-background">背景衬底</label><p>在字幕后面加一层半透明黑底，画面明亮时更易读。</p></div>
+          <div class="row-control">
+            <label class="switch">
+              <input type="checkbox" id="subtitle-background" data-path="subtitles.background">
+              <span class="slider"></span>
+            </label>
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="row-label"><label for="shortcut-subtitles">字幕快捷键</label><p>在视频页面切换双语字幕。</p></div>
+          <div class="row-control">
+            <input class="shortcut" id="shortcut-subtitles" data-path="subtitles.shortcut" readonly placeholder="Alt+S">
+          </div>
+        </div>
+      </div>
+
+      <div class="card note-card">
+        <div class="card-title">支持范围</div>
+        <ul class="bullets">
+          <li><strong>YouTube</strong>：读取视频自带的字幕轨（优先人工字幕，其次自动字幕），在播放器内叠加双语字幕。</li>
+          <li><strong>原生 &lt;track&gt;</strong>：页面上带 WebVTT 字幕轨的 HTML5 播放器。</li>
+          <li>没有字幕轨的视频（例如直播、纯音乐）无法生成字幕，需要站点自身提供文本。</li>
+          <li>字幕同样走翻译缓存，同一段字幕不会重复请求。</li>
+        </ul>
+      </div>
+    </section>
+
     <!-- ============================ 翻译服务 ============================ -->
     <section class="section" id="services">
       <div class="section-head">
@@ -420,7 +492,7 @@
       <div class="card">
         <div class="row">
           <div class="row-label"><label>版本</label><p>设置结构与旧版兼容，升级不会丢失配置。</p></div>
-          <div class="row-control"><span class="pill" id="about-version">v0.2.0</span></div>
+          <div class="row-control"><span class="pill" id="about-version">v0.3.0</span></div>
         </div>
         <div class="row">
           <div class="row-label"><label>配置文件</label><p>导出后可在另一台设备导入。</p></div>
@@ -437,6 +509,7 @@
         <ul class="bullets">
           <li><kbd id="kbd-toggle">Alt+T</kbd> 翻译 / 还原当前页面</li>
           <li><kbd id="kbd-selection">Alt+Shift+T</kbd> 翻译当前选中的文本</li>
+          <li><kbd id="kbd-subtitles">Alt+S</kbd> 开关视频双语字幕</li>
           <li><kbd>Esc</kbd> 关闭译文气泡</li>
         </ul>
       </div>

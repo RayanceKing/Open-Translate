@@ -187,6 +187,97 @@ html.ot-preset-blur .ot-translation:focus-within {
   background: #2a1616 !important;
 }
 
+/* ---------- video subtitles ---------- */
+
+.ot-sub {
+  position: fixed;
+  left: 0;
+  bottom: 0;
+  z-index: 2147483000;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 0 5%;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.14s ease;
+  font-size: 22px;
+  line-height: 1.35;
+  text-align: center;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.85);
+  box-sizing: border-box;
+}
+
+.ot-sub.is-visible {
+  opacity: 1;
+}
+
+.ot-sub.is-offscreen {
+  opacity: 0 !important;
+}
+
+.ot-sub-src,
+.ot-sub-dst {
+  max-width: 100%;
+  padding: 2px 10px;
+  border-radius: 6px;
+  color: #fff;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.ot-sub-src {
+  font-size: 0.78em;
+  opacity: 0.82;
+}
+
+.ot-sub-dst:empty,
+.ot-sub-src:empty {
+  display: none;
+}
+
+.ot-sub.ot-sub-solid .ot-sub-src,
+.ot-sub.ot-sub-solid .ot-sub-dst {
+  background: rgba(0, 0, 0, 0.62);
+}
+
+.ot-sub.ot-sub-dst-only .ot-sub-src {
+  display: none;
+}
+
+/* In overlay/track mode we render the original line ourselves, so the player's
+   own caption window would only duplicate it. In YouTube native-hook mode
+   (ot-sub-ythook) we keep YouTube's caption as the original and only paint the
+   translation above it, so we must NOT hide it. */
+html.ot-sub-on:not(.ot-sub-ythook) .ytp-caption-window-container,
+html.ot-sub-on:not(.ot-sub-ythook) .ytp-caption-window-container * {
+  display: none !important;
+}
+
+/* Translation line painted just above YouTube's native caption (hook mode). */
+.ot-yt-sub {
+  position: fixed;
+  z-index: 2147483000;
+  padding: 2px 10px;
+  border-radius: 6px;
+  color: #fff;
+  text-align: center;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.85);
+  background: rgba(0, 0, 0, 0.55);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.14s ease;
+  box-sizing: border-box;
+  max-width: 92vw;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.ot-yt-sub.is-visible {
+  opacity: 1;
+}
+
 /* ---------- toast ---------- */
 
 .ot-toast {

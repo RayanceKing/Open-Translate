@@ -74,6 +74,15 @@ function bind() {
     }
   });
 
+  $('#subtitles').addEventListener('click', async () => {
+    try {
+      await sendToPage({ type: 'toggle-subtitles' });
+      window.close();
+    } catch {
+      setStatus('这个页面没有可用的视频字幕', true);
+    }
+  });
+
   $('#open-options').addEventListener('click', () => {
     chrome.runtime.openOptionsPage();
     window.close();

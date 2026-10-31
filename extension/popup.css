@@ -163,6 +163,11 @@ select:focus {
   margin-top: 14px;
 }
 
+.actions.subtitle-row {
+  grid-template-columns: 1fr;
+  margin-top: 8px;
+}
+
 .primary,
 .ghost {
   border-radius: 9px;

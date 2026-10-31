@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Open Translate · Bilingual Web Reader
 // @namespace    https://github.com/open-translate
-// @version      0.2.0
+// @version      0.3.0
 // @description  In-place bilingual translation with switchable engines, AI providers and style presets. Option+T to toggle.
 // @author       Open Translate contributors
 // @match        http://*/*
@@ -136,6 +136,7 @@
       claude: { apiKey: '', model: 'claude-3-5-haiku-latest' }
     },
     siteRules: { blacklist: [], alwaysTranslate: [] },
+    subtitles: { enabled: true, mode: 'bilingual', fontSize: 100, position: 10, background: true, shortcut: 'Alt+S' },
     ui: { showFloatingButton: true, dock: { side: 'right', top: 0.68 } }
   };
 
@@ -223,6 +224,31 @@
     const [r, g, b] = match.slice(1).map(part => parseInt(part, 16));
     return `rgba(${r}, ${g}, ${b}, ${alpha})`;
   }
+
+  // YouTube (and a handful of other sites) send `require-trusted-types-for
+  // 'script'`, which makes any `element.innerHTML = "<markup>"` throw a
+  // TypeError. Route every markup write through our own Trusted Types policy
+  // so the UI still builds there. Empty strings stay exempt, so clearing an
+  // element does not need this wrapper.
+  const trustedPolicy = (() => {
+    try {
+      return window.trustedTypes?.createPolicy?.('open-translate', { createHTML: markup => markup }) || null;
+    } catch {
+      return null; // the page may already own a policy with that name
+    }
+  })();
+
+  const trustedHtml = markup => (trustedPolicy ? trustedPolicy.createHTML(markup) : markup);
+
+  // Values interpolated into that markup come from user settings, so they must
+  // not be able to inject tags — the policy above intentionally does not filter.
+  const escapeHtml = value =>
+    String(value ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
 
   function maskAll(texts) {
     const values = [];
@@ -636,6 +662,719 @@
     return results;
   }
 
+  // ---------------------------------------------------------------- subtitles
+  // Mirrors the extension module: textTracks / fetched VTT / YouTube json3 all
+  // normalise into the same cue list, rendered by our own overlay.
+
+  const SUB_ATTR = 'data-ot-sub';
+  const SUB_PREFETCH = 12;
+  const SUB_CSS = `
+    .ot-sub { position: fixed; left: 0; bottom: 0; z-index: 2147483000; display: flex; flex-direction: column;
+      align-items: center; gap: 2px; padding: 0 5%; pointer-events: none; opacity: 0;
+      transition: opacity .14s ease; font-size: 22px; line-height: 1.35; text-align: center;
+      text-shadow: 0 1px 3px rgba(0,0,0,.85); box-sizing: border-box; }
+    .ot-sub.is-visible { opacity: 1; }
+    .ot-sub.is-offscreen { opacity: 0 !important; }
+    .ot-sub-src, .ot-sub-dst { max-width: 100%; padding: 2px 10px; border-radius: 6px; color: #fff;
+      white-space: pre-wrap; overflow-wrap: anywhere; }
+    .ot-sub-src { font-size: .78em; opacity: .82; }
+    .ot-sub-src:empty, .ot-sub-dst:empty { display: none; }
+    .ot-sub.ot-sub-solid .ot-sub-src, .ot-sub.ot-sub-solid .ot-sub-dst { background: rgba(0,0,0,.62); }
+    .ot-sub.ot-sub-dst-only .ot-sub-src { display: none; }
+    html.ot-sub-on:not(.ot-sub-ythook) .ytp-caption-window-container, html.ot-sub-on:not(.ot-sub-ythook) .ytp-caption-window-container * { display: none !important; }
+    .ot-yt-sub { position: fixed; z-index: 2147483000; padding: 2px 10px; border-radius: 6px; color: #fff; text-align: center; text-shadow: 0 1px 3px rgba(0,0,0,.85); background: rgba(0,0,0,.55); pointer-events: none; opacity: 0; transition: opacity .14s ease; box-sizing: border-box; max-width: 92vw; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .ot-yt-sub.is-visible { opacity: 1; }
+  `;
+
+  const SUB = {
+    on: false, userOff: false, video: null, layer: null, cues: [], index: -1,
+    raf: 0, watchdog: 0, lastTick: 0, loading: false, pending: new Set(), handlers: null,
+    cueHandler: null, mode: null, styled: false, errorAt: 0
+  };
+
+  const subHost = location.hostname.replace(/^www\./, '');
+  const isYouTube = () => /(^|\.)youtube\.com$/.test(subHost) || /(^|\.)youtube-nocookie\.com$/.test(subHost);
+
+  function injectSubStyle() {
+    if (SUB.styled) return;
+    SUB.styled = true;
+    const style = document.createElement('style');
+    style.id = 'ot-sub-style';
+    style.textContent = SUB_CSS;
+    (document.head || document.documentElement).append(style);
+  }
+
+  // Pick the video the user is actually watching. A page can hold several
+  // <video> elements (previews, mini players, ad slots, a paused poster), and
+  // binding to one that is not playing freezes `currentTime` -- the overlay then
+  // shows whatever line was current when we attached and never advances. So we
+  // prefer an element that is actively playing; visible area only breaks ties.
+  function findMainVideo() {
+    const candidates = [...document.querySelectorAll('video')].filter(node => {
+      if (!node.currentSrc && !node.src) return false;
+      const rect = node.getBoundingClientRect();
+      return rect.width >= 160 && rect.height >= 90;
+    });
+    if (!candidates.length) return null;
+    const playing = candidates.filter(node => !node.paused && !node.ended && node.readyState >= 2);
+    const pool = playing.length ? playing : candidates;
+    return pool.sort((a, b) => {
+      const ra = a.getBoundingClientRect();
+      const rb = b.getBoundingClientRect();
+      return rb.width * rb.height - ra.width * ra.height;
+    })[0];
+  }
+
+  function subTimestamp(value) {
+    const match = /^(?:(\d+):)?(\d{1,2}):(\d{2})[.,](\d{1,3})$/.exec(String(value).trim());
+    if (!match) return null;
+    const [, hours, minutes, seconds, fraction] = match;
+    return Number(hours || 0) * 3600 + Number(minutes) * 60 + Number(seconds) + Number(fraction.padEnd(3, '0')) / 1000;
+  }
+
+  function parseVtt(text) {
+    const cues = [];
+    const blocks = String(text || '').replace(/\r\n?/g, '\n').split(/\n{2,}/);
+    for (const block of blocks) {
+      const lines = block.split('\n').filter(line => line.trim());
+      if (!lines.length) continue;
+      if (/^WEBVTT/.test(lines[0]) || /^NOTE\b/.test(lines[0])) continue;
+      const timeIndex = lines.findIndex(line => line.includes('-->'));
+      if (timeIndex < 0) continue;
+      const [rawStart, rawEnd] = lines[timeIndex].split('-->');
+      const start = subTimestamp(rawStart);
+      const end = subTimestamp(String(rawEnd || '').trim().split(/\s+/)[0]);
+      if (start == null || end == null) continue;
+      const body = lines.slice(timeIndex + 1).join(' ')
+        .replace(/<[^>]+>/g, '')
+        .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
+      const value = clean(body);
+      if (value) cues.push({ start, end: Math.max(end, start + 0.4), text: value, translation: null });
+    }
+    return cues;
+  }
+
+  function parseJson3(data) {
+    const events = Array.isArray(data?.events) ? data.events : [];
+    const cues = [];
+    for (const event of events) {
+      if (!Array.isArray(event?.segs)) continue;
+      const value = clean(event.segs.map(segment => segment?.utf8 || '').join(''));
+      if (!value) continue;
+      const start = (Number(event.tStartMs) || 0) / 1000;
+      const duration = (Number(event.dDurationMs) || 0) / 1000;
+      cues.push({ start, end: Math.max(start + duration, start + 0.4), text: value, translation: null });
+    }
+    return cues;
+  }
+
+  function cuesFromTextTracks(video) {
+    const tracks = [...(video.textTracks || [])];
+    const track =
+      tracks.find(item => item.kind === 'subtitles') ||
+      tracks.find(item => item.kind === 'captions') ||
+      tracks[0];
+    if (!track) return [];
+    if (track.mode === 'disabled') track.mode = 'hidden';
+    const list = track.cues;
+    if (!list || !list.length) return [];
+    return [...list]
+      .map(cue => ({
+        start: cue.startTime,
+        end: Math.max(cue.endTime, cue.startTime + 0.4),
+        text: clean(cue.text || ''),
+        translation: null
+      }))
+      .filter(cue => cue.text);
+  }
+
+  async function cuesFromVttElement(video) {
+    const element = video.querySelector('track[src]');
+    if (!element) return [];
+    try {
+      const text = await http({ url: element.src, timeout: 15000 });
+      return typeof text === 'string' ? parseVtt(text) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  function youtubeCaptionTracks() {
+    let response = null;
+    try {
+      const player = document.getElementById('movie_player');
+      if (player && typeof player.getPlayerResponse === 'function') response = player.getPlayerResponse();
+    } catch {
+      /* player not ready */
+    }
+    if (!response) response = window.ytInitialPlayerResponse;
+    const list = response?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
+    return Array.isArray(list) ? list : [];
+  }
+
+  function pickCaptionTrack(tracks) {
+    const wanted = settings.sourceLanguage;
+    const score = track => {
+      let value = 0;
+      if (track.kind !== 'asr') value += 4;
+      if (wanted !== 'auto' && track.languageCode === wanted) value += 8;
+      if (wanted === 'auto' && track.languageCode === 'en') value += 1;
+      return value;
+    };
+    return [...tracks].sort((a, b) => score(b) - score(a))[0] || null;
+  }
+
+  async function cuesFromYouTube() {
+    const track = pickCaptionTrack(youtubeCaptionTracks());
+    if (!track?.baseUrl) return [];
+    const url = `${track.baseUrl}${track.baseUrl.includes('?') ? '&' : '?'}fmt=json3`;
+    const data = await http({ url, timeout: 15000 });
+    return typeof data === 'object' ? parseJson3(data) : [];
+  }
+
+  async function loadCues(video) {
+    const native = cuesFromTextTracks(video);
+    if (native.length) return native;
+    const fromVtt = await cuesFromVttElement(video);
+    if (fromVtt.length) return fromVtt;
+    if (isYouTube()) return cuesFromYouTube();
+    return [];
+  }
+
+  // ------------------------------------------------- YouTube native captions
+  //
+  // Immersive-translate style: instead of polling video.currentTime and binary
+  // searching our own cue list, we let YouTube paint the original line and we
+  // watch its caption window. Whenever YouTube renders a new line we grab the
+  // text, translate it, and paint the translation just above YouTube's own
+  // caption. The original stays native; we only add the translation. If we
+  // cannot turn captions on (no track, internal API gone), callers fall back to
+  // the injected-track path below.
+
+  const YT_CAPTION_CONTAINER = '.ytp-caption-window-container';
+  const YT_CAPTION_SEGMENT = '.ytp-caption-segment';
+  const ytTransCache = new Map();
+
+  function enableYouTubeCaptions() {
+    const player = document.getElementById('movie_player');
+    if (!player || typeof player.setOption !== 'function') return false;
+    const track = pickCaptionTrack(youtubeCaptionTracks());
+    if (!track) return false;
+    const shapes = [
+      () => player.setOption('captions', 'track', { languageCode: track.languageCode, kind: track.kind || 'asr', name: track.name }),
+      () => player.setOption('captions', 'track', track.languageCode),
+      () => player.setOption('captions', 'track', { languageCode: track.languageCode })
+    ];
+    for (const shape of shapes) {
+      try { shape(); return true; } catch { /* try next shape */ }
+    }
+    return false;
+  }
+
+  function ytCaptionContainer() {
+    return document.querySelector(YT_CAPTION_CONTAINER);
+  }
+
+  function ytCurrentText() {
+    const container = ytCaptionContainer();
+    if (!container) return '';
+    const segments = container.querySelectorAll(YT_CAPTION_SEGMENT);
+    if (!segments.length) return '';
+    return [...segments].map(node => node.textContent).join(' ').replace(/\s+/g, ' ').trim();
+  }
+
+  function ensureYtLayer() {
+    let layer = document.querySelector('.ot-yt-sub');
+    if (layer) return layer;
+    layer = document.createElement('div');
+    layer.className = 'ot-yt-sub';
+    layer.setAttribute(SUB_ATTR, '');
+    (document.getElementById('movie_player') || document.body).append(layer);
+    return layer;
+  }
+
+  function positionYtLayer(layer) {
+    const container = ytCaptionContainer();
+    if (!container || !layer) return;
+    const ref = container.querySelector('.ytp-caption-window-rollup, .caption-window') || container;
+    const rect = ref.getBoundingClientRect();
+    layer.style.fontSize = `${clampValue(rect.height * 0.085, 14, 40)}px`;
+    layer.style.left = `${rect.left}px`;
+    layer.style.width = `${rect.width}px`;
+    layer.style.top = `${Math.max(4, rect.top - 2)}px`;
+    layer.style.transform = 'translateY(-100%)';
+  }
+
+  async function ytRenderText(text) {
+    const layer = ensureYtLayer();
+    if (!text) { layer.classList.remove('is-visible'); layer.textContent = ''; return; }
+    let translation = ytTransCache.get(text);
+    if (translation === undefined) {
+      try {
+        translation = (await requestTranslation([text]))[0] || '';
+      } catch {
+        translation = '';
+      }
+      ytTransCache.set(text, translation);
+    }
+    layer.textContent = translation;
+    layer.classList.toggle('is-visible', Boolean(translation));
+    positionYtLayer(layer);
+  }
+
+  let ytObserver = null;
+  let ytLastText = '';
+
+  function startYouTubeHook() {
+    if (!enableYouTubeCaptions()) return false;
+    const container = ytCaptionContainer();
+    if (!container) return false;
+    ytLastText = '';
+    let scheduled = false;
+    const tick = () => {
+      if (scheduled) return;
+      scheduled = true;
+      setTimeout(async () => {
+        scheduled = false;
+        const text = ytCurrentText();
+        if (text === ytLastText) return;
+        ytLastText = text;
+        await ytRenderText(text);
+      }, 0);
+    };
+    ytObserver = new MutationObserver(tick);
+    ytObserver.observe(container, { childList: true, subtree: true, characterData: true });
+    tick();
+    return true;
+  }
+
+  function stopYouTubeHook() {
+    if (ytObserver) { ytObserver.disconnect(); ytObserver = null; }
+    document.querySelector('.ot-yt-sub')?.remove();
+    ytLastText = '';
+  }
+
+  // --------------------------------------------------- injected-track driver
+  //
+  // Fallback for non-YouTube pages and for YouTube when native captions cannot
+  // be turned on. We feed the cue list into a hidden <track> on the playing
+  // video and let the browser drive cue switching through the `cuechange`
+  // event. No currentTime polling, no binary search, no watchdog -- the media
+  // pipeline is the single source of truth for "what line is on now".
+
+  function cuesToVtt(cues) {
+    const stamp = seconds => {
+      const ms = Math.floor((seconds % 1) * 1000);
+      const total = Math.floor(seconds);
+      const h = Math.floor(total / 3600);
+      const m = Math.floor((total % 3600) / 60);
+      const s = total % 60;
+      return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}.${String(ms).padStart(3, '0')}`;
+    };
+    const blocks = ['WEBVTT', ''];
+    for (const cue of cues) {
+      blocks.push(`${stamp(cue.start)} --> ${stamp(cue.end)}`);
+      blocks.push(cue.text);
+      blocks.push('');
+    }
+    return blocks.join('\n');
+  }
+
+  async function injectHiddenTrack(video, cues) {
+    const vtt = cuesToVtt(cues);
+    const url = URL.createObjectURL(new Blob([vtt], { type: 'text/vtt' }));
+    let element = video.querySelector('track[data-ot]');
+    if (!element) {
+      element = document.createElement('track');
+      element.setAttribute('data-ot', '');
+      element.kind = 'subtitles';
+      element.srclang = (settings.sourceLanguage || 'en').split('-')[0];
+      video.appendChild(element);
+    }
+    element.src = url;
+    element.mode = 'hidden';
+    const textTrack = await new Promise(resolve => {
+      const settle = () => {
+        element.removeEventListener('load', settle);
+        element.removeEventListener('error', settle);
+        resolve(element.track || null);
+      };
+      element.addEventListener('load', settle);
+      element.addEventListener('error', settle);
+      if (element.track && element.track.cues) settle();
+      setTimeout(() => resolve(element.track || null), 2500);
+    });
+    SUB.cueHandler = { track: textTrack, url, onCue: null };
+    return textTrack;
+  }
+
+  async function startCueDriver(video, cues) {
+    cues.sort((a, b) => a.start - b.start);
+    SUB.cues = cues;
+    SUB.index = -1;
+    SUB.video = video;
+    const track = await injectHiddenTrack(video, cues);
+    if (!track) return false;
+    const onCue = () => {
+      const active = track.activeCues;
+      if (!active || !active.length) {
+        SUB.index = -1;
+        renderCue(-1);
+        positionSubLayer();
+        return;
+      }
+      let index = -1;
+      for (const cue of active) {
+        const hit = SUB.cues.findIndex(c => Math.abs(c.start - cue.startTime) < 0.05);
+        if (hit >= 0) { index = hit; break; }
+      }
+      if (index < 0) return;
+      SUB.index = index;
+      renderCue(index);
+      positionSubLayer();
+    };
+    track.addEventListener('cuechange', onCue);
+    track.mode = 'hidden';
+    SUB.cueHandler.onCue = onCue;
+    onCue();
+    return true;
+  }
+
+  function ensureLayer() {
+    if (SUB.layer?.isConnected) return SUB.layer;
+    injectSubStyle();
+    const layer = document.createElement('div');
+    layer.className = 'ot-sub';
+    layer.setAttribute(SUB_ATTR, '');
+    layer.innerHTML = trustedHtml('<div class="ot-sub-src"></div><div class="ot-sub-dst"></div>');
+    document.body.append(layer);
+    SUB.layer = layer;
+    return layer;
+  }
+
+  function applySubtitleStyle() {
+    const layer = SUB.layer;
+    if (!layer) return;
+    layer.classList.toggle('ot-sub-solid', Boolean(settings.subtitles.background));
+    layer.classList.toggle('ot-sub-dst-only', settings.subtitles.mode === 'translation');
+  }
+
+  function positionSubLayer() {
+    const { layer, video } = SUB;
+    if (!layer || !video) return;
+    const rect = video.getBoundingClientRect();
+    const offscreen = rect.bottom < 40 || rect.top > window.innerHeight - 40 || rect.width < 120;
+    layer.classList.toggle('is-offscreen', offscreen);
+    if (offscreen) return;
+    const gap = (rect.height * settings.subtitles.position) / 100;
+    layer.style.fontSize = `${clampValue(rect.height * 0.042, 14, 44) * (settings.subtitles.fontSize / 100)}px`;
+    layer.style.left = `${rect.left}px`;
+    layer.style.width = `${rect.width}px`;
+    layer.style.bottom = `${Math.max(0, window.innerHeight - rect.bottom) + gap}px`;
+  }
+
+  function findCueIndex(cues, time) {
+    let low = 0;
+    let high = cues.length - 1;
+    let found = -1;
+    while (low <= high) {
+      const mid = (low + high) >> 1;
+      if (cues[mid].start <= time) {
+        found = mid;
+        low = mid + 1;
+      } else {
+        high = mid - 1;
+      }
+    }
+    if (found < 0) return -1;
+    for (let index = found; index >= Math.max(0, found - 2); index -= 1) {
+      if (cues[index].start <= time && time < cues[index].end) return index;
+    }
+    return -1;
+  }
+
+  function renderCue(index) {
+    const layer = SUB.layer;
+    if (!layer) return;
+    const source = layer.querySelector('.ot-sub-src');
+    const target = layer.querySelector('.ot-sub-dst');
+    if (index < 0) {
+      source.textContent = '';
+      target.textContent = '';
+      layer.classList.remove('is-visible');
+      return;
+    }
+    const cue = SUB.cues[index];
+    source.textContent = cue.text;
+    target.textContent = cue.translation || '';
+    layer.classList.add('is-visible');
+    ensureSubTranslated(index);
+  }
+
+  function updateCue(force = false) {
+    if (!SUB.video || !SUB.cues.length) return;
+    const index = findCueIndex(SUB.cues, SUB.video.currentTime);
+    if (!force && index === SUB.index) return;
+    SUB.index = index;
+    try {
+      renderCue(index);
+    } catch {
+      /* one malformed cue must not stall the rest of the track */
+    }
+  }
+
+  // Cue switching and layout are isolated from each other on purpose: a throw in
+  // either one used to take the other down with it.
+  function syncSubOnce() {
+    SUB.lastTick = Date.now();
+    const video = ensureSubVideo();
+    if (!video) return;
+    try { updateCue(); } catch { /* keep the driver alive */ }
+    try { positionSubLayer(); } catch { /* keep the driver alive */ }
+  }
+
+  function stopSubTick() {
+    if (SUB.raf) cancelAnimationFrame(SUB.raf);
+    SUB.raf = 0;
+    if (SUB.watchdog) clearInterval(SUB.watchdog);
+    SUB.watchdog = 0;
+  }
+
+  // Three drivers, because each one can stall on its own:
+  //   rAF          smooth while the tab is visible and the page is idle
+  //   timeupdate   still fires when rAF is paused (background tab, busy page)
+  //   watchdog     catches rAF silently stopping while the tab looks visible,
+  //                which is exactly the "only the first cue ever shows" report
+  function startSubTick() {
+    stopSubTick();
+    const step = () => {
+      SUB.raf = requestAnimationFrame(step);
+      syncSubOnce();
+    };
+    SUB.raf = requestAnimationFrame(step);
+    SUB.watchdog = setInterval(() => {
+      if (Date.now() - SUB.lastTick < 150) return; // rAF is healthy
+      syncSubOnce();
+    }, 250);
+  }
+
+  async function ensureSubTranslated(index) {
+    const cues = SUB.cues;
+    if (!cues.length) return;
+    const from = Math.max(0, index - 2);
+    const to = Math.min(cues.length - 1, index + SUB_PREFETCH);
+    const missing = [];
+    for (let cursor = from; cursor <= to; cursor += 1) {
+      if (cues[cursor].translation === null && !SUB.pending.has(cursor)) missing.push(cursor);
+    }
+    if (!missing.length) return;
+    missing.forEach(cursor => SUB.pending.add(cursor));
+    const texts = missing.map(cursor => cues[cursor].text);
+    try {
+      const results = await requestTranslation(texts);
+      results.forEach((value, position) => {
+        const target = missing[position];
+        if (cues[target]) cues[target].translation = value || '';
+      });
+      if (missing.includes(SUB.index)) {
+        const line = SUB.layer?.querySelector('.ot-sub-dst');
+        if (line) line.textContent = cues[SUB.index]?.translation || '';
+      }
+    } catch (error) {
+      // A failed batch must not tear down the overlay: the original line is
+      // still readable and the next window shift retries. After a second
+      // failure the cue is marked as "translated to nothing" so we stop
+      // hammering the engine on every frame.
+      missing.forEach(cursor => {
+        const cue = cues[cursor];
+        if (!cue) return;
+        cue.attempts = (cue.attempts || 0) + 1;
+        if (cue.attempts >= 2) cue.translation = '';
+      });
+      if (Date.now() - SUB.errorAt > 10000) {
+        SUB.errorAt = Date.now();
+        toast(`字幕翻译失败：${error.message}`);
+      }
+    } finally {
+      missing.forEach(cursor => SUB.pending.delete(cursor));
+    }
+  }
+
+  // YouTube rebuilds its player on navigation, so the element we bound to can be
+  // detached while the page keeps playing. Re-bind instead of reading a frozen
+  // currentTime forever.
+  function ensureSubVideo() {
+    const current = SUB.video;
+    // Healthy: still attached and actually playing. Nothing to do.
+    if (current?.isConnected && !current.paused && !current.ended) return current;
+    // The bound element stopped playing (paused, ended, or YouTube rebuilt the
+    // player). Look for a better one instead of reading a frozen currentTime.
+    const next = findMainVideo();
+    if (!next) return current && current.isConnected ? current : null;
+    if (next === current) return current;
+    unbindSubVideo();
+    SUB.video = next;
+    SUB.index = -1;
+    bindSubVideo(next);
+    return next;
+  }
+
+  function bindSubVideo(video) {
+    if (SUB.handlers?.video === video) return;
+    unbindSubVideo();
+    const onPlay = () => startSubTick();
+    const onPause = () => {
+      stopSubTick();
+      updateCue();
+      positionSubLayer();
+    };
+    const onSeek = () => {
+      updateCue(true);
+      positionSubLayer();
+    };
+    video.addEventListener('play', onPlay);
+    video.addEventListener('playing', onPlay);
+    video.addEventListener('pause', onPause);
+    video.addEventListener('seeked', onSeek);
+    video.addEventListener('emptied', onSeek);
+    // `timeupdate` fires ~4x/s even when rAF is paused, so the cue still
+    // advances in a background tab or on a page that starves animation frames.
+    video.addEventListener('timeupdate', syncSubOnce);
+    video.addEventListener('loadedmetadata', onSeek);
+    SUB.handlers = { video, onPlay, onPause, onSeek };
+  }
+
+  function unbindSubVideo() {
+    const handlers = SUB.handlers;
+    if (!handlers) return;
+    handlers.video.removeEventListener('play', handlers.onPlay);
+    handlers.video.removeEventListener('playing', handlers.onPlay);
+    handlers.video.removeEventListener('pause', handlers.onPause);
+    handlers.video.removeEventListener('seeked', handlers.onSeek);
+    handlers.video.removeEventListener('emptied', handlers.onSeek);
+    handlers.video.removeEventListener('timeupdate', syncSubOnce);
+    handlers.video.removeEventListener('loadedmetadata', handlers.onSeek);
+    SUB.handlers = null;
+  }
+
+  function stopSubtitles() {
+    stopYouTubeHook();
+    if (SUB.cueHandler) {
+      const { track, onCue, url } = SUB.cueHandler;
+      if (track && onCue) track.removeEventListener('cuechange', onCue);
+      if (url) URL.revokeObjectURL(url);
+      SUB.cueHandler = null;
+    }
+    stopSubTick();
+    unbindSubVideo();
+    SUB.on = false;
+    SUB.cues = [];
+    SUB.index = -1;
+    SUB.pending.clear();
+    SUB.layer?.remove();
+    SUB.layer = null;
+    SUB.video = null;
+    SUB.mode = null;
+    document.documentElement.classList.remove('ot-sub-on', 'ot-sub-ythook');
+  }
+
+  async function startSubtitles(manual = false) {
+    if (SUB.loading) return;
+    // YouTube: prefer hooking the player's native caption window (immersive
+    // style) -- the original stays native and we only add the translation.
+    // Falls back to the injected-track path when captions cannot be turned on.
+    if (isYouTube()) {
+      if (startYouTubeHook()) {
+        SUB.on = true;
+        SUB.mode = 'ythook';
+        document.documentElement.classList.add('ot-sub-on', 'ot-sub-ythook');
+        return;
+      }
+      // hook failed; fall through to injected-track mode below
+    }
+    const video = SUB.video || findMainVideo();
+    if (!video) {
+      if (manual) toast('当前页面没有可用的视频');
+      return;
+    }
+    SUB.video = video;
+    SUB.on = true;
+    SUB.mode = 'track';
+    ensureLayer();
+    applySubtitleStyle();
+    positionSubLayer();
+    document.documentElement.classList.add('ot-sub-on');
+
+    SUB.loading = true;
+    try {
+      let cues = [];
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        try {
+          cues = await loadCues(video);
+        } catch (error) {
+          if (attempt === 2) throw error;
+          cues = [];
+        }
+        if (cues.length || !SUB.on) break;
+        // YouTube publishes captionTracks asynchronously, so the first attempt
+        // can run before the player response exists. Retrying beats declaring
+        // "no subtitles here" and never trying again for the rest of the video.
+        if (!isYouTube()) break;
+        await new Promise(resolve => setTimeout(resolve, 400 * (attempt + 1)));
+      }
+      if (!SUB.on) return;
+      if (!cues.length) {
+        if (manual) toast(isYouTube() ? '这个视频没有可用字幕' : '没有找到字幕轨');
+        stopSubtitles();
+        return;
+      }
+      const ok = await startCueDriver(video, cues);
+      if (!ok) {
+        toast('字幕轨加载失败');
+        stopSubtitles();
+        return;
+      }
+      // Belt-and-suspenders: the injected track normally drives the overlay via
+      // `cuechange`, but some players/browsers fail to emit it (or stop after
+      // the first cue). Bind the rAF + timeupdate + watchdog drivers too so the
+      // cue keeps advancing off `video.currentTime` even if `cuechange` stalls.
+      bindSubVideo(video);
+      if (!video.paused) startSubTick();
+    } catch (error) {
+      toast(`字幕加载失败：${error.message}`);
+      stopSubtitles();
+    } finally {
+      SUB.loading = false;
+    }
+  }
+
+  function toggleSubtitles() {
+    if (SUB.on) {
+      SUB.userOff = true;
+      stopSubtitles();
+      toast('已关闭双语字幕');
+    } else {
+      SUB.userOff = false;
+      startSubtitles(true);
+    }
+  }
+
+  document.addEventListener('play', event => {
+    if (!(event.target instanceof HTMLVideoElement)) return;
+    if (!settings.subtitles.enabled || SUB.on || SUB.userOff) return;
+    if (SUB.video && SUB.video !== event.target) return;
+    startSubtitles();
+  }, true);
+
+  window.addEventListener('resize', () => positionSubLayer());
+  document.addEventListener('fullscreenchange', () => positionSubLayer());
+  document.addEventListener('scroll', () => positionSubLayer(), { passive: true, capture: true });
+  document.addEventListener('yt-navigate-finish', () => {
+    if (!settings.subtitles.enabled || SUB.userOff || !SUB.on) return;
+    stopSubtitles();
+    startSubtitles();
+  });
+
   // ---------------------------------------------------------------- appearance
 
   const MODES = ['bilingual', 'translation', 'hover'];
@@ -763,7 +1502,7 @@
     active = false;
     queue.length = 0;
     for (const [el, html] of originalHtml) {
-      if (el.isConnected) el.innerHTML = html;
+      if (el.isConnected) el.innerHTML = trustedHtml(html);
     }
     originalHtml.clear();
     document.querySelectorAll(`[${MARK}]`).forEach(node => node.remove());
@@ -956,9 +1695,10 @@
 
     const dock = document.createElement('div');
     dock.className = 'dock';
-    dock.innerHTML =
+    dock.innerHTML = trustedHtml(
       '<button class="gear" type="button" aria-label="设置">⚙</button>' +
-      '<button class="ball" type="button"></button>';
+        '<button class="ball" type="button"></button>'
+    );
     shadow.append(dock);
 
     const overlay = document.createElement('div');
@@ -1090,16 +1830,16 @@
         if (field.type === 'switch') {
           return `<div class="field"${depends}${hidden}><label>${field.label}</label><label class="switch"><input type="checkbox" data-k="engines.${engine}.${field.key}" ${config[field.key] ? 'checked' : ''}><i></i></label></div>`;
         }
-        const value = String(config[field.key] ?? '').replace(/"/g, '&quot;');
+        const value = escapeHtml(config[field.key] ?? '');
         return `<div class="field"${depends}${hidden}><label>${field.label}</label><input type="${field.type === 'password' ? 'password' : 'text'}" data-k="engines.${engine}.${field.key}" value="${value}" placeholder="${field.placeholder || ''}" spellcheck="false" autocomplete="off"></div>`;
       })
       .join('');
 
-    ui.overlay.innerHTML = `
+    ui.overlay.innerHTML = trustedHtml(`
       <div class="dialog" role="dialog" aria-modal="true">
         <div class="head">
           <h2>Open Translate 设置</h2>
-          <span class="ver">v0.2.0</span>
+          <span class="ver">v0.3.0</span>
           <button class="close" type="button" aria-label="关闭">✕</button>
         </div>
         <div class="tabs">
@@ -1107,6 +1847,7 @@
           <button class="tab" data-tab="style" type="button">样式</button>
           <button class="tab" data-tab="engine" type="button">引擎</button>
           <button class="tab" data-tab="ai" type="button">AI</button>
+          <button class="tab" data-tab="subtitles" type="button">字幕</button>
         </div>
         <div class="body">
           <div class="pane active" data-pane="general">
@@ -1148,10 +1889,26 @@
           </div>
 
           <div class="pane" data-pane="ai">
-            <div class="field col"><label>提示词模板</label><textarea data-k="ai.prompt" rows="6" spellcheck="false">${settings.ai.prompt}</textarea></div>
+            <div class="field col"><label>提示词模板</label><textarea data-k="ai.prompt" rows="6" spellcheck="false">${escapeHtml(settings.ai.prompt)}</textarea></div>
             <p class="hint">可用变量 {{target}}、{{source}}。仅在 OpenAI / DeepSeek / Gemini / Claude 引擎下生效。</p>
-            <div class="field col"><label>术语表</label><textarea data-k="ai.glossary" rows="4" spellcheck="false" placeholder="prompt = 提示词">${settings.ai.glossary}</textarea></div>
+            <div class="field col"><label>术语表</label><textarea data-k="ai.glossary" rows="4" spellcheck="false" placeholder="prompt = 提示词">${escapeHtml(settings.ai.glossary)}</textarea></div>
             <div class="field"><label>温度 ${Number(settings.ai.temperature).toFixed(1)}</label><input type="range" data-k="ai.temperature" min="0" max="1" step="0.1" value="${settings.ai.temperature}"></div>
+          </div>
+
+          <div class="pane" data-pane="subtitles">
+            <div class="field"><label>启用双语字幕</label><label class="switch"><input type="checkbox" data-k="subtitles.enabled" ${settings.subtitles.enabled ? 'checked' : ''}><i></i></label></div>
+            <div class="field"><label>显示方式</label><div class="seg">${[
+              ['bilingual', '双语'], ['translation', '仅译文']
+            ].map(([id, name]) => `<button type="button" data-sub-mode="${id}" class="${settings.subtitles.mode === id ? 'active' : ''}">${name}</button>`).join('')}</div></div>
+            <div class="field"><label>字号 ${settings.subtitles.fontSize}%</label><input type="range" data-k="subtitles.fontSize" min="60" max="200" step="5" value="${settings.subtitles.fontSize}"></div>
+            <div class="field"><label>距底部 ${settings.subtitles.position}%</label><input type="range" data-k="subtitles.position" min="2" max="45" step="1" value="${settings.subtitles.position}"></div>
+            <div class="field"><label>背景衬底</label><label class="switch"><input type="checkbox" data-k="subtitles.background" ${settings.subtitles.background ? 'checked' : ''}><i></i></label></div>
+            <div class="field"><label>快捷键</label><input type="text" data-k="subtitles.shortcut" value="${escapeHtml(settings.subtitles.shortcut)}" spellcheck="false" autocomplete="off"></div>
+            <div class="row-actions">
+              <button class="btn" type="button" data-sub-toggle>在本页开关字幕</button>
+              <span class="status" data-sub-status></span>
+            </div>
+            <p class="hint">支持 YouTube 字幕轨与页面里的 &lt;track&gt; 元素。开启后视频开始播放时自动加载，译文同样走翻译缓存。</p>
           </div>
         </div>
         <div class="footer">
@@ -1163,7 +1920,7 @@
           <input type="file" accept="application/json" data-file hidden>
         </div>
       </div>
-    `;
+    `);
 
     bindSettingsUi();
   }
@@ -1242,14 +1999,33 @@
       toast('翻译缓存已清空');
     });
 
-    root.querySelectorAll('.seg button').forEach(button => {
+    // Scoped to [data-mode]: the subtitle pane reuses the same .seg markup.
+    root.querySelectorAll('.seg button[data-mode]').forEach(button => {
       button.addEventListener('click', () => {
         settings.displayMode = button.dataset.mode;
         persist();
         applyAppearance();
-        root.querySelectorAll('.seg button').forEach(node => node.classList.toggle('active', node === button));
+        root.querySelectorAll('.seg button[data-mode]').forEach(node => node.classList.toggle('active', node === button));
       });
     });
+
+    root.querySelectorAll('.seg button[data-sub-mode]').forEach(button => {
+      button.addEventListener('click', () => {
+        settings.subtitles.mode = button.dataset.subMode;
+        persist();
+        applySubtitleStyle();
+        root.querySelectorAll('.seg button[data-sub-mode]').forEach(node => node.classList.toggle('active', node === button));
+      });
+    });
+
+    const subToggle = root.querySelector('[data-sub-toggle]');
+    if (subToggle) {
+      subToggle.addEventListener('click', () => {
+        toggleSubtitles();
+        const status = root.querySelector('[data-sub-status]');
+        if (status) status.textContent = SUB.on ? '本页已开启' : '本页已关闭';
+      });
+    }
 
     root.querySelectorAll('.preset').forEach(button => {
       button.addEventListener('click', () => {
@@ -1271,6 +2047,14 @@
         setPath(settings, path, value);
         persist();
         applyAppearance();
+        if (path.startsWith('subtitles.')) {
+          applySubtitleStyle();
+          positionSubLayer();
+          const label = input.previousElementSibling;
+          if (label && path === 'subtitles.fontSize') label.textContent = `字号 ${value}%`;
+          if (label && path === 'subtitles.position') label.textContent = `距底部 ${value}%`;
+          if (path === 'subtitles.enabled' && !value) stopSubtitles();
+        }
         if (path === 'engine') {
           updatePanel();
           renderSettings();
@@ -1322,7 +2106,25 @@
 
   // ---------------------------------------------------------------- shortcuts
 
+  function matchesSubShortcut(event) {
+    const combo = String(settings.subtitles.shortcut || '').toLowerCase();
+    if (!combo) return false;
+    const parts = combo.split('+').map(part => part.trim()).filter(Boolean);
+    const key = parts.pop();
+    if (!key) return false;
+    if (event.altKey !== parts.includes('alt')) return false;
+    if (event.ctrlKey !== parts.includes('ctrl')) return false;
+    if (event.shiftKey !== parts.includes('shift')) return false;
+    if (event.metaKey !== (parts.includes('meta') || parts.includes('cmd'))) return false;
+    return event.code?.toLowerCase() === `key${key}` || event.key?.toLowerCase() === key;
+  }
+
   document.addEventListener('keydown', event => {
+    if (matchesSubShortcut(event)) {
+      event.preventDefault();
+      toggleSubtitles();
+      return;
+    }
     const isToggle = event.altKey && !event.ctrlKey && !event.metaKey && event.code === 'KeyT';
     if (!isToggle) {
       if (event.key === 'Escape') {

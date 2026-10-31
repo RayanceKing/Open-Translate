@@ -5,6 +5,7 @@ import {
   DISPLAY_MODES,
   LANGUAGES,
   STYLE_PRESETS,
+  SUBTITLE_MODES,
   normalizeSettings,
   styleToVars
 } from './lib/defaults.js';
@@ -91,6 +92,28 @@ function renderDisplayModes() {
 
 function syncDisplayModes() {
   $$('#display-modes .radio-card').forEach(card => card.classList.toggle('is-selected', card.dataset.mode === settings.displayMode));
+}
+
+function renderSubtitleModes() {
+  const container = $('#subtitle-modes');
+  container.innerHTML = SUBTITLE_MODES.map(
+    mode => `<button type="button" class="radio-card" data-subtitle-mode="${mode.id}">
+      <strong>${mode.name}</strong><span>${mode.desc}</span>
+    </button>`
+  ).join('');
+  container.addEventListener('click', event => {
+    const card = event.target.closest('[data-subtitle-mode]');
+    if (!card) return;
+    settings.subtitles.mode = card.dataset.subtitleMode;
+    syncSubtitleModes();
+    scheduleSave();
+  });
+}
+
+function syncSubtitleModes() {
+  $$('#subtitle-modes .radio-card').forEach(card =>
+    card.classList.toggle('is-selected', card.dataset.subtitleMode === settings.subtitles.mode)
+  );
 }
 
 function renderPresets() {
@@ -251,6 +274,7 @@ function updateEngineNote() {
 function formatValue(path, value) {
   if (path === 'style.lineHeight') return `${Number(value).toFixed(2)}`;
   if (path === 'style.fontSize' || path === 'style.opacity') return `${value}%`;
+  if (path === 'subtitles.fontSize' || path === 'subtitles.position') return `${value}%`;
   if (path === 'ai.temperature') return Number(value).toFixed(1);
   if (typeof value === 'number') return `${value}px`;
   return String(value);
@@ -274,8 +298,10 @@ function syncControls() {
   $('#engine').value = settings.engine;
   $('#kbd-toggle').textContent = settings.shortcuts.toggle;
   $('#kbd-selection').textContent = settings.shortcuts.selection;
+  $('#kbd-subtitles').textContent = settings.subtitles.shortcut || '未设置';
   syncDisplayModes();
   syncPresets();
+  syncSubtitleModes();
   syncServiceActive();
   updateEngineNote();
 }
@@ -342,6 +368,7 @@ function bindShortcutInputs() {
       setPath(settings, input.dataset.path, combo);
       $('#kbd-toggle').textContent = settings.shortcuts.toggle;
       $('#kbd-selection').textContent = settings.shortcuts.selection;
+      $('#kbd-subtitles').textContent = settings.subtitles.shortcut || '未设置';
       scheduleSave();
     });
   });
@@ -478,6 +505,7 @@ async function init() {
   renderEngineSelect();
   renderLanguages();
   renderDisplayModes();
+  renderSubtitleModes();
   renderPresets();
   bindServices();
   bindControls();

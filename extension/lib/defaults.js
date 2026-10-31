@@ -1,6 +1,6 @@
 // Shared settings model. Imported by the service worker, options page and popup.
 
-export const APP_VERSION = '0.2.0';
+export const APP_VERSION = '0.3.0';
 
 export const LANGUAGES = [
   { code: 'zh-CN', label: '简体中文' },
@@ -31,6 +31,11 @@ export const DISPLAY_MODES = [
   { id: 'bilingual', name: '双语对照', desc: '原文在上，译文紧随其后，最常用的阅读方式' },
   { id: 'translation', name: '仅译文', desc: '隐藏原文，只显示译文，适合快速浏览' },
   { id: 'hover', name: '悬停显示', desc: '译文默认隐藏，鼠标移到原文上才浮现' }
+];
+
+export const SUBTITLE_MODES = [
+  { id: 'bilingual', name: '双语字幕', desc: '原文在上、译文在下，对照着看' },
+  { id: 'translation', name: '仅译文', desc: '只显示译文，画面更干净' }
 ];
 
 export const STYLE_PRESETS = [
@@ -96,6 +101,14 @@ export const DEFAULT_SETTINGS = {
     glossary: '',
     temperature: 0.2
   },
+  subtitles: {
+    enabled: true,
+    mode: 'bilingual',
+    fontSize: 100,
+    position: 10,
+    background: true,
+    shortcut: 'Alt+S'
+  },
   shortcuts: {
     toggle: 'Alt+T',
     selection: 'Alt+Shift+T'
@@ -145,6 +158,11 @@ export function normalizeSettings(raw) {
   settings.style.fontSize = clamp(Number(settings.style.fontSize) || 100, 60, 200);
   settings.style.opacity = clamp(Number(settings.style.opacity) || 100, 20, 100);
   settings.style.lineHeight = clamp(Number(settings.style.lineHeight) || 1.7, 1, 2.6);
+  if (!['bilingual', 'translation'].includes(settings.subtitles.mode)) settings.subtitles.mode = 'bilingual';
+  settings.subtitles.fontSize = clamp(Number(settings.subtitles.fontSize) || 100, 60, 200);
+  settings.subtitles.position = clamp(Number(settings.subtitles.position) || 10, 2, 45);
+  settings.subtitles.enabled = Boolean(settings.subtitles.enabled);
+  settings.subtitles.background = Boolean(settings.subtitles.background);
   settings.siteRules.blacklist = toList(settings.siteRules.blacklist);
   settings.siteRules.alwaysTranslate = toList(settings.siteRules.alwaysTranslate);
   return settings;

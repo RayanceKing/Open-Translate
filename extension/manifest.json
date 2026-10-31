@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Open Translate",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Privacy-conscious in-place bilingual web translation with switchable engines and AI translation.",
   "permissions": ["storage", "activeTab", "contextMenus"],
   "host_permissions": ["http://*/*", "https://*/*"],
