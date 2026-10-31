@@ -115,6 +115,9 @@
     ['quote', '引用块'], ['highlight', '高亮'], ['faded', '淡色'], ['blur', '模糊']
   ];
 
+  /** Accent shipped before the switch to Apple system blue. See loadSettings. */
+  const LEGACY_ACCENT = '#6d5dfc';
+
   const DEFAULTS = {
     engine: 'google',
     sourceLanguage: 'auto',
@@ -126,7 +129,7 @@
     privacy: { maskSensitive: true },
     style: {
       preset: 'underline', fontSize: 100, lineHeight: 1.7, fontWeight: 400, opacity: 100,
-      colorMode: 'inherit', color: '#3f3f46', accent: '#6d5dfc', background: '#6d5dfc',
+      colorMode: 'inherit', color: '#3f3f46', accent: '#007AFF', background: '#007AFF',
       radius: 6, paddingX: 8, paddingY: 2, marginTop: 4, marginBottom: 12
     },
     ai: { prompt: DEFAULT_PROMPT, glossary: '', temperature: 0.2 },
@@ -186,6 +189,11 @@
     }
     const next = structuredClone(DEFAULTS);
     if (saved) deepMerge(next, saved);
+    // The shipped accent used to be purple; anyone who never opened the colour
+    // pickers still carries that value, so remap the old default to Apple blue.
+    for (const key of ['accent', 'background']) {
+      if (String(next.style[key]).toLowerCase() === LEGACY_ACCENT) next.style[key] = DEFAULTS.style[key];
+    }
     // Before 0.2.0 Microsoft only had a keyed Azure channel, so a stored key
     // with no `useKey` flag means the user was on Azure — keep them there.
     const legacy = saved && saved.engines && saved.engines.microsoft;
@@ -229,7 +237,7 @@
 
   function hexToRgba(hex, alpha) {
     const match = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(String(hex || '').trim());
-    if (!match) return `rgba(109, 93, 252, ${alpha})`;
+    if (!match) return `rgba(0, 122, 255, ${alpha})`;
     const [r, g, b] = match.slice(1).map(part => parseInt(part, 16));
     return `rgba(${r}, ${g}, ${b}, ${alpha})`;
   }
@@ -1672,8 +1680,25 @@
   let ui = null;
 
   const UI_CSS = `
-    :host { all: initial; }
-    * { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif; }
+    :host {
+      all: initial;
+      --dlg-text: #1b1b2a;
+      --dlg-muted: #6d6e80;
+      --dlg-line: rgba(20, 22, 50, .10);
+      --dlg-line-strong: rgba(20, 22, 50, .16);
+      --dlg-field: rgba(255, 255, 255, .60);
+      --dlg-field-hover: rgba(255, 255, 255, .86);
+      --dlg-glass: rgba(255, 255, 255, .72);
+      --dlg-glass-strong: rgba(255, 255, 255, .94);
+      --dlg-sheen: linear-gradient(180deg, rgba(255,255,255,.55), rgba(255,255,255,0) 130px);
+      --dlg-inner: inset 0 1px 0 rgba(255,255,255,.95);
+      --dlg-accent: #007AFF;
+      --dlg-accent-2: #0A84FF;
+      --dlg-accent-ink: #0062CC;
+      --dlg-accent-soft: rgba(0,122,255,.12);
+      --dlg-shadow: 0 42px 96px -32px rgba(0,0,0,.55), 0 10px 30px rgba(0,0,0,.16);
+    }
+    * { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', 'PingFang SC', sans-serif; }
     .dock { position: fixed; display: flex; flex-direction: column; align-items: center; gap: 6px;
       width: 44px; z-index: 2147483647; }
     .dock.snapping { transition: left .24s cubic-bezier(.22,.61,.36,1), top .24s ease; }
@@ -1683,87 +1708,174 @@
       opacity: .85; cursor: pointer; transition: opacity .15s ease, transform .15s ease, background .15s ease; }
     .gear:hover { opacity: 1; transform: scale(1.08); background: #2a2a38; }
     .ball { display: flex; align-items: center; justify-content: center; width: 44px; height: 44px; padding: 0;
-      border: 0; border-radius: 50%; background: linear-gradient(140deg,#7d6dff,#5b4ae8); color: #fff;
+      border: 0; border-radius: 50%; background: linear-gradient(140deg,#4DA2FF,#007AFF); color: #fff;
       font: 600 13px/1 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; letter-spacing: .02em;
       box-shadow: 0 6px 18px rgba(0,0,0,.28); cursor: grab; user-select: none; touch-action: none;
       transition: background .2s ease, transform .15s ease, box-shadow .2s ease; }
     .ball:hover { transform: scale(1.06); box-shadow: 0 8px 22px rgba(0,0,0,.34); }
     .dock.dragging .ball { cursor: grabbing; transform: scale(1.04); }
     .dock.active .ball { background: linear-gradient(140deg,#4a4763,#2f2d42); }
-    .overlay { position: fixed; inset: 0; background: rgba(12,12,18,.55); display: flex; align-items: center;
-      justify-content: center; z-index: 2147483646; backdrop-filter: blur(2px); }
+
+    .overlay { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+      z-index: 2147483646; background: rgba(12,12,20,.38);
+      -webkit-backdrop-filter: blur(10px) saturate(140%); backdrop-filter: blur(10px) saturate(140%); }
     .dialog { width: min(720px, 92vw); max-height: 84vh; display: flex; flex-direction: column; overflow: hidden;
-      border-radius: 16px; background: #fff; color: #1b1b2a; box-shadow: 0 24px 70px rgba(0,0,0,.35); }
-    .head { display: flex; align-items: center; gap: 10px; padding: 16px 20px 12px; }
-    .head h2 { margin: 0; font-size: 15px; font-weight: 600; }
-    .head .ver { font-size: 11px; color: #8b8b9e; }
-    .close { margin-left: auto; border: 0; background: transparent; font-size: 18px; cursor: pointer; color: #6d6e80; line-height: 1; }
-    .tabs { display: flex; gap: 4px; padding: 0 16px 12px; border-bottom: 1px solid #e7e7f0; }
-    .tab { border: 0; background: transparent; padding: 6px 12px; border-radius: 8px; font-size: 13px;
-      color: #6d6e80; cursor: pointer; }
-    .tab.active { background: rgba(109,93,252,.12); color: #4a3ddb; font-weight: 600; }
-    .body { padding: 16px 20px; overflow-y: auto; }
+      border-radius: 26px; color: var(--dlg-text);
+      background-color: var(--dlg-glass); background-image: var(--dlg-sheen);
+      border: 1px solid rgba(255,255,255,.7);
+      box-shadow: var(--dlg-inner), inset 0 0 0 1px rgba(255,255,255,.22), var(--dlg-shadow);
+      -webkit-backdrop-filter: blur(30px) saturate(180%); backdrop-filter: blur(30px) saturate(180%); }
+    .head { display: flex; align-items: center; gap: 10px; padding: 20px 22px 14px; }
+    .head h2 { margin: 0; font-size: 16px; font-weight: 650; letter-spacing: -.02em; }
+    .head .ver { font-size: 11px; color: var(--dlg-muted); padding: 1px 8px; border-radius: 999px;
+      border: 1px solid var(--dlg-line-strong); background: var(--dlg-field); box-shadow: var(--dlg-inner); }
+    .close { margin-left: auto; width: 30px; height: 30px; display: grid; place-items: center; border: 0;
+      border-radius: 50%; background: var(--dlg-field); color: var(--dlg-muted); font-size: 13px; line-height: 1;
+      cursor: pointer; box-shadow: var(--dlg-inner); transition: background .15s ease, color .15s ease, transform .12s ease; }
+    .close:hover { background: var(--dlg-field-hover); color: var(--dlg-text); }
+    .close:active { transform: scale(.94); }
+
+    .tabs { position: relative; display: flex; gap: 3px; margin: 0 20px 14px; padding: 4px; border-radius: 14px;
+      background: var(--dlg-field); border: 1px solid var(--dlg-line);
+      box-shadow: inset 0 1px 2px rgba(20,22,50,.06); }
+    /* Sliding pill: the highlight is a single element that glides between tabs
+       instead of each button painting its own background. */
+    .tab-glider { position: absolute; top: 4px; left: 4px; width: 0; height: calc(100% - 8px);
+      border-radius: 11px; background: var(--dlg-glass-strong); pointer-events: none; opacity: 0;
+      box-shadow: 0 5px 14px -8px rgba(20,24,60,.5), inset 0 1px 0 rgba(255,255,255,.9);
+      transition: transform .34s cubic-bezier(.32,1.24,.56,1), width .34s cubic-bezier(.32,1.24,.56,1),
+        opacity .2s ease; }
+    .tab-glider.ready { opacity: 1; }
+    .tab-glider.instant { transition: none; }
+    .tab { flex: 1 1 0; min-width: 0; position: relative; z-index: 1; border: 0; background: transparent;
+      padding: 7px 8px; border-radius: 11px; font-size: 12.5px; color: var(--dlg-muted); cursor: pointer;
+      transition: color .16s ease; }
+    .tab:hover { color: var(--dlg-text); }
+    .tab.active { color: var(--dlg-accent-ink); font-weight: 650; }
+
+    .body { padding: 4px 20px 18px; overflow-y: auto; }
     .pane { display: none; }
     .pane.active { display: block; }
     .field { display: flex; align-items: center; gap: 14px; margin-bottom: 12px; }
     .field.col { display: block; }
     .field[hidden] { display: none; }
-    .field > label:not(.switch) { flex: 0 0 118px; font-size: 13px; color: #6d6e80; }
+    .field > label:not(.switch) { flex: 0 0 118px; font-size: 13px; color: var(--dlg-muted); }
     .field.col > label { display: block; margin-bottom: 6px; flex: none; }
     .field input[type=text], .field input[type=password], .field select, .field textarea {
-      flex: 1 1 auto; min-width: 0; padding: 8px 10px; border: 1px solid #e7e7f0; border-radius: 8px;
-      font-size: 13px; background: #fff; color: inherit; outline: none; }
+      flex: 1 1 auto; min-width: 0; padding: 8px 12px; border: 1px solid var(--dlg-line-strong);
+      border-radius: 12px; font-size: 13px; background: var(--dlg-field); color: inherit; outline: none;
+      box-shadow: inset 0 1px 2px rgba(20,22,50,.05), var(--dlg-inner);
+      transition: border-color .16s ease, box-shadow .16s ease, background .16s ease; }
+    .field input[type=text]:hover, .field input[type=password]:hover, .field select:hover,
+    .field textarea:hover { background: var(--dlg-field-hover); }
+    .field select { appearance: none; -webkit-appearance: none; cursor: pointer; padding-right: 30px;
+      background-image: linear-gradient(45deg, transparent 50%, var(--dlg-muted) 50%),
+        linear-gradient(135deg, var(--dlg-muted) 50%, transparent 50%);
+      background-position: calc(100% - 15px) 52%, calc(100% - 10px) 52%;
+      background-size: 5px 5px, 5px 5px; background-repeat: no-repeat; }
     .field textarea { width: 100%; resize: vertical; font-family: ui-monospace, Menlo, monospace; font-size: 12px; line-height: 1.6; }
-    .field input:focus, .field select:focus, .field textarea:focus { border-color: #6d5dfc; box-shadow: 0 0 0 3px rgba(109,93,252,.12); }
-    .field input[type=range] { flex: 1 1 auto; height: 20px; accent-color: #6d5dfc; }
-    .hint { font-size: 11.5px; color: #8b8b9e; margin: -6px 0 12px; line-height: 1.5; }
+    .field input:focus, .field select:focus, .field textarea:focus {
+      border-color: var(--dlg-accent); box-shadow: 0 0 0 4px var(--dlg-accent-soft), var(--dlg-inner); }
+    .field input[type=color] { width: 46px; height: 34px; padding: 4px; border: 1px solid var(--dlg-line-strong);
+      border-radius: 12px; background: var(--dlg-field); box-shadow: var(--dlg-inner); cursor: pointer; }
+    .field input[type=color]::-webkit-color-swatch-wrapper { padding: 0; }
+    .field input[type=color]::-webkit-color-swatch { border: 0; border-radius: 8px; }
+    .field input[type=range] { flex: 1 1 auto; height: 6px; appearance: none; -webkit-appearance: none;
+      border-radius: 999px; background: var(--dlg-accent-soft); outline: none;
+      box-shadow: inset 0 1px 2px rgba(20,22,50,.1); }
+    .field input[type=range]::-webkit-slider-thumb { appearance: none; -webkit-appearance: none;
+      width: 19px; height: 19px; border-radius: 50%; background: linear-gradient(180deg,#fff,#f0f0f6);
+      border: 1px solid rgba(20,22,50,.14);
+      box-shadow: inset 0 1px 0 #fff, 0 2px 6px rgba(0,0,0,.22), 0 0 0 4px rgba(255,255,255,.35); cursor: pointer; }
+    .hint { font-size: 11.5px; color: var(--dlg-muted); margin: -6px 0 12px; line-height: 1.6; }
+
     .presets { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 14px; }
-    .preset { border: 1px solid #e7e7f0; border-radius: 10px; padding: 8px 6px; background: #fff; font-size: 12px;
-      cursor: pointer; text-align: center; color: inherit; }
-    .preset.active { border-color: #6d5dfc; box-shadow: 0 0 0 3px rgba(109,93,252,.14); }
-    .seg { display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px; padding: 3px; border: 1px solid #e7e7f0;
-      border-radius: 9px; background: #fafaff; flex: 1 1 auto; }
-    .seg button { border: 0; background: transparent; padding: 6px 0; border-radius: 6px; font-size: 12px;
-      color: #6d6e80; cursor: pointer; }
-    .seg button.active { background: #6d5dfc; color: #fff; font-weight: 600; }
-    .switch { position: relative; width: 40px; height: 24px; flex: 0 0 auto; margin-left: auto; }
+    .preset { border: 1px solid var(--dlg-line-strong); border-radius: 14px; padding: 9px 6px;
+      background: var(--dlg-field); font-size: 12px; cursor: pointer; text-align: center; color: inherit;
+      box-shadow: var(--dlg-inner); transition: border-color .16s ease, background .16s ease, box-shadow .16s ease, transform .12s ease; }
+    .preset:hover { border-color: var(--dlg-accent); background: var(--dlg-field-hover); }
+    .preset:active { transform: scale(.98); }
+    .preset.active { border-color: var(--dlg-accent); color: var(--dlg-accent-ink); font-weight: 600;
+      background: linear-gradient(180deg, rgba(0,122,255,.20), rgba(0,122,255,.09));
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.55), 0 0 0 3px var(--dlg-accent-soft); }
+
+    .seg { display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px; padding: 4px;
+      border: 1px solid var(--dlg-line); border-radius: 13px; background: var(--dlg-field);
+      box-shadow: inset 0 1px 2px rgba(20,22,50,.06); flex: 1 1 auto; }
+    .seg button { border: 0; background: transparent; padding: 6px 0; border-radius: 10px; font-size: 12px;
+      color: var(--dlg-muted); cursor: pointer; transition: background .16s ease, color .16s ease, box-shadow .16s ease; }
+    .seg button:hover { color: var(--dlg-text); }
+    .seg button.active { background: var(--dlg-glass-strong); color: var(--dlg-accent-ink); font-weight: 650;
+      box-shadow: 0 5px 14px -8px rgba(20,24,60,.5), inset 0 1px 0 rgba(255,255,255,.9); }
+
+    .switch { position: relative; width: 46px; height: 28px; flex: 0 0 auto; margin-left: auto; }
     .switch input { position: absolute; opacity: 0; width: 100%; height: 100%; margin: 0; cursor: pointer; }
-    .switch i { position: absolute; inset: 0; border-radius: 999px; background: #dcdce6; transition: background .16s; }
-    .switch i::after { content: ''; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px;
-      border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.2); transition: transform .16s; }
-    .switch input:checked + i { background: #6d5dfc; }
-    .switch input:checked + i::after { transform: translateX(16px); }
+    .switch i { position: absolute; inset: 0; border-radius: 999px; background: var(--dlg-line-strong);
+      box-shadow: inset 0 1px 3px rgba(0,0,0,.14); transition: background .2s ease, box-shadow .2s ease; }
+    .switch i::after { content: ''; position: absolute; top: 3px; left: 3px; width: 22px; height: 22px;
+      border-radius: 50%; background: linear-gradient(180deg,#fff,#f1f1f6);
+      box-shadow: inset 0 1px 0 #fff, 0 2px 6px rgba(0,0,0,.24);
+      transition: transform .2s cubic-bezier(.34,1.56,.64,1); }
+    .switch input:checked + i { background: linear-gradient(180deg, var(--dlg-accent-2), var(--dlg-accent));
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.4), 0 6px 16px -8px rgba(0,122,255,.85); }
+    .switch input:checked + i::after { transform: translateX(18px); }
+    .switch input:focus-visible + i { box-shadow: 0 0 0 4px var(--dlg-accent-soft), inset 0 1px 3px rgba(0,0,0,.14); }
+
     .row-actions { display: flex; align-items: center; gap: 10px; margin: 6px 0 12px; }
-    .btn { border: 1px solid #e7e7f0; background: #fff; color: inherit; padding: 6px 12px; border-radius: 8px;
-      font-size: 12.5px; cursor: pointer; }
-    .btn:hover { border-color: #6d5dfc; color: #4a3ddb; }
-    .btn.primary { background: #6d5dfc; border-color: #6d5dfc; color: #fff; font-weight: 600; }
-    .status { font-size: 12px; color: #8b8b9e; }
+    .btn { border: 1px solid var(--dlg-line-strong); background: var(--dlg-field); color: inherit;
+      padding: 7px 15px; border-radius: 999px; font-size: 12.5px; font-weight: 550; cursor: pointer;
+      box-shadow: var(--dlg-inner); transition: background .16s ease, border-color .16s ease, color .16s ease, transform .12s ease; }
+    .btn:hover { border-color: rgba(0,122,255,.5); color: var(--dlg-accent-ink); background: var(--dlg-field-hover); }
+    .btn:active { transform: scale(.975); }
+    .btn.primary { background: linear-gradient(180deg, var(--dlg-accent-2), var(--dlg-accent));
+      border-color: rgba(255,255,255,.18); color: #fff; font-weight: 650;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.4), 0 10px 22px -10px rgba(0,122,255,.9); }
+    .btn.primary:hover { filter: brightness(1.06); color: #fff; }
+    .status { font-size: 12px; color: var(--dlg-muted); }
     .status.ok { color: #1a7f37; }
     .status.bad { color: #d92d20; }
-    .footer { display: flex; align-items: center; gap: 10px; padding: 12px 20px; border-top: 1px solid #e7e7f0; }
-    .footer .note { font-size: 11.5px; color: #8b8b9e; flex: 1 1 auto; }
+    .muted-inline { margin-left: auto; font-size: 12px; color: var(--dlg-muted); }
+
+    .footer { display: flex; align-items: center; gap: 9px; padding: 14px 20px 18px;
+      border-top: 1px solid var(--dlg-line); background: var(--dlg-field); }
+    .footer .note { font-size: 11.5px; color: var(--dlg-muted); flex: 1 1 auto; }
+
     @media (prefers-color-scheme: dark) {
-      .dialog { background: #17171f; color: #ececf3; }
-      .tabs, .footer { border-color: #2a2a37; }
-      .field input[type=text], .field input[type=password], .field select, .field textarea {
-        background: #101018; border-color: #2a2a37; color: #ececf3; }
-      .field input[type=color] { border-color: #2a2a37; }
-      .tab { color: #9a9aad; }
-      .tab.active { background: rgba(139,125,255,.18); color: #b0a6ff; }
-      .close { color: #9a9aad; }
-      .field > label:not(.switch) { color: #9a9aad; }
-      .hint { color: #8b8b9e; }
-      .preset { border-color: #2a2a37; background: #101018; color: #ececf3; }
-      .preset.active { border-color: #8b7dff; }
-      .seg { background: #101018; border-color: #2a2a37; }
-      .seg button { color: #9a9aad; }
-      .seg button.active { background: #8b7dff; color: #fff; }
-      .switch i { background: #3a3a48; }
-      .switch input:checked + i { background: #8b7dff; }
-      .btn { background: #101018; border-color: #2a2a37; color: #ececf3; }
-      .btn.primary { background: #8b7dff; border-color: #8b7dff; color: #fff; }
-      .field input[type=range] { accent-color: #8b7dff; }
+      :host {
+        --dlg-text: #ececf3;
+        --dlg-muted: #9a9aad;
+        --dlg-line: rgba(255,255,255,.08);
+        --dlg-line-strong: rgba(255,255,255,.15);
+        --dlg-field: rgba(255,255,255,.06);
+        --dlg-field-hover: rgba(255,255,255,.10);
+        --dlg-glass: rgba(28,29,42,.74);
+        --dlg-glass-strong: rgba(42,43,60,.94);
+        --dlg-sheen: linear-gradient(180deg, rgba(255,255,255,.10), rgba(255,255,255,0) 130px);
+        --dlg-inner: inset 0 1px 0 rgba(255,255,255,.12);
+        --dlg-accent: #0A84FF;
+        --dlg-accent-2: #3395FF;
+        --dlg-accent-ink: #66B2FF;
+        --dlg-accent-soft: rgba(10,132,255,.16);
+        --dlg-shadow: 0 46px 100px -34px rgba(0,0,0,.85), 0 10px 30px rgba(0,0,0,.4);
+      }
+      .dialog { border-color: rgba(255,255,255,.10); }
+      .tab-glider, .seg button.active {
+        /* --dlg-glass-strong sits within ~1% luminance of the tab bar in dark,
+           so the selected pill needs its own slightly brighter surface. */
+        background: rgba(255,255,255,.13);
+        box-shadow: 0 5px 14px -8px rgba(0,0,0,.7), inset 0 1px 0 rgba(255,255,255,.14); }
+      .status.ok { color: #3ddc84; }
+      .status.bad { color: #ff6b5e; }
+    }
+
+    @media (prefers-reduced-transparency: reduce) {
+      .dialog { background-color: var(--dlg-glass-strong); -webkit-backdrop-filter: none; backdrop-filter: none; }
+      .overlay { -webkit-backdrop-filter: none; backdrop-filter: none; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      /* Keep the fade, drop the glide. */
+      .tab-glider { transition: opacity .2s ease; }
     }
   `;
 
@@ -1799,6 +1911,11 @@
     bindDock();
     placeDock();
     updatePanel();
+
+    // Keep the tab pill aligned when the dialog's metrics change while open.
+    addEventListener('resize', () => {
+      if (overlay.style.display !== 'none') positionTabGlider(false);
+    }, { passive: true });
   }
 
   function dockPosition() {
@@ -1927,6 +2044,7 @@
           <button class="close" type="button" aria-label="关闭">✕</button>
         </div>
         <div class="tabs">
+          <span class="tab-glider" aria-hidden="true"></span>
           <button class="tab active" data-tab="general" type="button">通用</button>
           <button class="tab" data-tab="style" type="button">样式</button>
           <button class="tab" data-tab="engine" type="button">引擎</button>
@@ -1947,7 +2065,7 @@
             <div class="field"><label>打开页面自动翻译</label><label class="switch"><input type="checkbox" data-k="autoTranslate" ${settings.autoTranslate ? 'checked' : ''}><i></i></label></div>
             <div class="field"><label>显示悬浮按钮</label><label class="switch"><input type="checkbox" data-k="ui.showFloatingButton" ${settings.ui.showFloatingButton ? 'checked' : ''}><i></i></label></div>
             <div class="field"><label>屏蔽敏感信息</label><label class="switch"><input type="checkbox" data-k="privacy.maskSensitive" ${settings.privacy.maskSensitive ? 'checked' : ''}><i></i></label></div>
-            <div class="field"><label>翻译缓存</label><span data-cache-count style="margin-left:auto;font-size:12px;color:#8b8b9e">${cacheCount()} 条</span><button class="btn" type="button" data-clear-cache>清空</button></div>
+            <div class="field"><label>翻译缓存</label><span data-cache-count class="muted-inline">${cacheCount()} 条</span><button class="btn" type="button" data-clear-cache>清空</button></div>
             <p class="hint">邮箱、电话与常见 API Token 会在发送前替换为占位符，返回后还原。快捷键：Alt+T 翻译 / 还原，Alt+Shift+T 翻译选中文本。</p>
           </div>
 
@@ -1958,8 +2076,8 @@
             <div class="field"><label>字号 ${settings.style.fontSize}%</label><input type="range" data-k="style.fontSize" min="60" max="160" step="5" value="${settings.style.fontSize}"></div>
             <div class="field"><label>行高 ${Number(settings.style.lineHeight).toFixed(2)}</label><input type="range" data-k="style.lineHeight" min="1" max="2.4" step="0.05" value="${settings.style.lineHeight}"></div>
             <div class="field"><label>不透明度 ${settings.style.opacity}%</label><input type="range" data-k="style.opacity" min="30" max="100" step="5" value="${settings.style.opacity}"></div>
-            <div class="field"><label>主题色</label><input type="color" data-k="style.accent" value="${settings.style.accent}" style="width:44px;height:30px;padding:2px;border:1px solid #e7e7f0;border-radius:8px;background:transparent"></div>
-            <div class="field"><label>背景色</label><input type="color" data-k="style.background" value="${settings.style.background}" style="width:44px;height:30px;padding:2px;border:1px solid #e7e7f0;border-radius:8px;background:transparent"></div>
+            <div class="field"><label>主题色</label><input type="color" data-k="style.accent" value="${settings.style.accent}"></div>
+            <div class="field"><label>背景色</label><input type="color" data-k="style.background" value="${settings.style.background}"></div>
           </div>
 
           <div class="pane" data-pane="engine">
@@ -2007,6 +2125,7 @@
     `);
 
     bindSettingsUi();
+    positionTabGlider(false);
   }
 
   function syncFieldDeps() {
@@ -2016,9 +2135,43 @@
     });
   }
 
+  // Move the highlight pill under the active tab. `animate === false` snaps it
+  // into place, which is what we want on first paint (there is no previous
+  // position to glide from) and on resize.
+  function positionTabGlider(animate = true) {
+    if (!ui?.overlay) return;
+    const tabs = ui.overlay.querySelector('.tabs');
+    const glider = tabs?.querySelector('.tab-glider');
+    const active = tabs?.querySelector('.tab.active');
+    if (!glider || !active) return;
+    // The dialog is display:none while closed, so nothing has a box yet. Keep
+    // the pill hidden rather than parking it at the wrong spot.
+    const width = active.getBoundingClientRect().width;
+    if (!width) {
+      glider.classList.remove('ready');
+      return;
+    }
+    // Rects rather than offsetLeft: those are rounded to integers, and the
+    // rounding compounds across five tabs. The glider's own inset comes from
+    // its CSS `left`, which is measured against the tabs' padding box.
+    const box = tabs.getBoundingClientRect();
+    const inset = (parseFloat(getComputedStyle(tabs).borderLeftWidth) || 0)
+      + (parseFloat(getComputedStyle(glider).left) || 0);
+    const shift = active.getBoundingClientRect().left - box.left - inset;
+    glider.classList.toggle('instant', !animate);
+    glider.style.width = `${width.toFixed(2)}px`;
+    glider.style.transform = `translateX(${shift.toFixed(2)}px)`;
+    glider.classList.add('ready');
+    if (!animate) {
+      void glider.offsetWidth; // flush the snap before transitions come back
+      glider.classList.remove('instant');
+    }
+  }
+
   function activateTab(name) {
     ui.overlay.querySelectorAll('.tab').forEach(node => node.classList.toggle('active', node.dataset.tab === name));
     ui.overlay.querySelectorAll('.pane').forEach(pane => pane.classList.toggle('active', pane.dataset.pane === name));
+    positionTabGlider(true);
   }
 
   function bindSettingsUi() {
@@ -2182,6 +2335,9 @@
     if (!ui) buildUi();
     renderSettings();
     ui.overlay.style.display = 'flex';
+    // renderSettings ran while the dialog was still hidden, so re-measure now
+    // that the tabs actually have a layout box.
+    positionTabGlider(false);
   }
 
   function closeSettings() {

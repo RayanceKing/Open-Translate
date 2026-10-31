@@ -46,8 +46,8 @@
       opacity: 100,
       colorMode: 'inherit',
       color: '#3f3f46',
-      accent: '#6d5dfc',
-      background: '#6d5dfc',
+      accent: '#007AFF',
+      background: '#007AFF',
       radius: 6,
       paddingX: 8,
       paddingY: 2,
@@ -99,7 +99,7 @@
 
   function hexToRgba(hex, alpha) {
     const match = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(String(hex || '').trim());
-    if (!match) return `rgba(109, 93, 252, ${alpha})`;
+    if (!match) return `rgba(0, 122, 255, ${alpha})`;
     const [r, g, b] = match.slice(1).map(part => parseInt(part, 16));
     return `rgba(${r}, ${g}, ${b}, ${alpha})`;
   }

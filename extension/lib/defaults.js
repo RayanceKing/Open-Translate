@@ -2,6 +2,9 @@
 
 export const APP_VERSION = '0.3.0';
 
+/** Accent shipped before the switch to Apple system blue. See normalizeSettings. */
+const LEGACY_ACCENT = '#6d5dfc';
+
 export const LANGUAGES = [
   { code: 'zh-CN', label: '简体中文' },
   { code: 'zh-TW', label: '繁體中文' },
@@ -77,8 +80,8 @@ export const DEFAULT_SETTINGS = {
     opacity: 100,
     colorMode: 'inherit',
     color: '#3f3f46',
-    accent: '#6d5dfc',
-    background: '#6d5dfc',
+    accent: '#007AFF',
+    background: '#007AFF',
     radius: 6,
     paddingX: 8,
     paddingY: 2,
@@ -151,6 +154,13 @@ export function normalizeSettings(raw) {
   const settings = mergeSettings(DEFAULT_SETTINGS, raw || {});
   settings.version = APP_VERSION;
   if (legacyMicrosoftKey) settings.engines.microsoft.useKey = true;
+  // The shipped accent used to be purple; anyone who never opened the colour
+  // pickers still carries that value, so remap the old default to Apple blue.
+  for (const key of ['accent', 'background']) {
+    if (String(settings.style[key]).toLowerCase() === LEGACY_ACCENT) {
+      settings.style[key] = DEFAULT_SETTINGS.style[key];
+    }
+  }
   if (!DISPLAY_MODES.some(mode => mode.id === settings.displayMode)) settings.displayMode = 'bilingual';
   if (!STYLE_PRESETS.some(preset => preset.id === settings.style.preset)) settings.style.preset = 'underline';
   settings.batchSize = clamp(Number(settings.batchSize) || 4, 1, 10);
@@ -179,7 +189,7 @@ export function toList(value) {
 
 /** Style object -> CSS custom properties applied on <html>. */
 export function styleToVars(style) {
-  const background = style.background || '#6d5dfc';
+  const background = style.background || '#007AFF';
   return {
     '--ot-fs': String(style.fontSize / 100),
     '--ot-lh': String(style.lineHeight),
@@ -200,7 +210,7 @@ export function styleToVars(style) {
 
 export function hexToRgba(hex, alpha) {
   const match = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(String(hex).trim());
-  if (!match) return `rgba(109, 93, 252, ${alpha})`;
+  if (!match) return `rgba(0, 122, 255, ${alpha})`;
   const [r, g, b] = match.slice(1).map(part => parseInt(part, 16));
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }

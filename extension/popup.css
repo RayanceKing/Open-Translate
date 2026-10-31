@@ -3,8 +3,8 @@
   --text: #1b1b2a;
   --muted: #6d6e80;
   --line: #e7e7f0;
-  --accent: #6d5dfc;
-  --accent-soft: rgba(109, 93, 252, 0.1);
+  --accent: #007AFF;
+  --accent-soft: rgba(0, 122, 255, 0.1);
   --field: #fbfbfe;
 }
 
@@ -14,8 +14,8 @@
     --text: #ececf3;
     --muted: #9a9aad;
     --line: #2a2a37;
-    --accent: #8b7dff;
-    --accent-soft: rgba(139, 125, 255, 0.16);
+    --accent: #0A84FF;
+    --accent-soft: rgba(10, 132, 255, 0.16);
     --field: #101018;
   }
 }
@@ -47,7 +47,7 @@ body {
   width: 30px;
   height: 30px;
   border-radius: 9px;
-  background: linear-gradient(140deg, #7d6dff, #5b4ae8);
+  background: linear-gradient(140deg, #4DA2FF, #007AFF);
   color: #fff;
   font-weight: 700;
   font-size: 14px;
