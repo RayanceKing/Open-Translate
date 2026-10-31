@@ -84,6 +84,15 @@
   // ---------------------------------------------------------------- utilities
 
   const clean = text => String(text || '').replace(/\s+/g, ' ').trim();
+  const translationText = text => String(text || '').replace(/\u00a0/g, ' ').trim();
+  const TRANSLATION_TIMEOUT = 12000;
+
+  function withTranslationTimeout(promise) {
+    return Promise.race([
+      promise,
+      new Promise((_, reject) => setTimeout(() => reject(new Error('翻译响应超时')), TRANSLATION_TIMEOUT))
+    ]);
+  }
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
   const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
   const isPlainObject = value => !!value && typeof value === 'object' && !Array.isArray(value);
@@ -257,6 +266,20 @@
     const node = document.createElement('div');
     node.className = 'ot-translation ot-pending';
     node.setAttribute(MARK, 'translation');
+    const sourceStyle = getComputedStyle(el);
+    for (const property of [
+      'display', 'font-family', 'font-size', 'font-weight', 'font-style', 'font-variant',
+      'line-height', 'letter-spacing', 'word-spacing', 'text-align', 'text-indent',
+      'text-transform', 'white-space', 'word-break', 'overflow-wrap', 'direction',
+      'writing-mode', 'vertical-align'
+    ]) {
+      node.style.setProperty(property, sourceStyle.getPropertyValue(property));
+    }
+    if (sourceStyle.display !== 'inline') {
+      node.style.display = sourceStyle.display === 'inline-block' ? 'inline-block' : 'block';
+    }
+    node.style.margin = sourceStyle.margin;
+    node.style.padding = sourceStyle.padding;
     const sourceLength = clean(el.textContent).length;
     if (settings.style.loadingStyle === 'apple') {
       node.classList.add('ot-loading-skeleton');
@@ -306,7 +329,7 @@
     while (inflight < settings.concurrency && queue.length) {
       const batch = queue.splice(0, Math.max(1, settings.batchSize));
       inflight += 1;
-      requestTranslation(batch.map(item => item.text))
+      withTranslationTimeout(requestTranslation(batch.map(item => item.text)))
         .then(texts => batch.forEach((item, index) => settle(item.node, texts[index], texts[index] ? null : '空译文')))
         .catch(error => batch.forEach(item => settle(item.node, null, error?.message || '未知错误')))
         .finally(() => {
@@ -318,7 +341,7 @@
 
   function enqueue(el) {
     if (!active || translating.has(el)) return;
-    const text = clean(el.innerText || el.textContent);
+    const text = translationText(el.innerText || el.textContent);
     if (!text) return;
     translating.add(el);
     queue.push({ el, node: mountTranslation(el), text });

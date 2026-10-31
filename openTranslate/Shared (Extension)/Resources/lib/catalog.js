@@ -1,7 +1,9 @@
 // UI metadata for every translation engine. Kept free of network code so the
 // options page can import it without pulling in the provider implementations.
 
-export const ENGINE_CATALOG = [
+const ENGINE_PRIORITY = ['apple', 'microsoft', 'google'];
+
+const ENGINE_CATALOG_DATA = [
   {
     id: 'google',
     name: 'Google 翻译',
@@ -46,6 +48,13 @@ export const ENGINE_CATALOG = [
       { key: 'url', label: '实例地址', type: 'text', placeholder: 'https://libretranslate.example.com' },
       { key: 'key', label: 'API Key（可选）', type: 'password', placeholder: '留空表示实例未开启鉴权' }
     ]
+  },
+  {
+    id: 'apple',
+    name: '系统翻译',
+    tag: '系统',
+    note: '调用设备内置的翻译框架（iOS 17 / macOS 14 及以上），文本在本地完成翻译、不会离开本机，也无需填写密钥。受系统语言包覆盖，个别语种可能暂不支持。',
+    fields: []
   },
   {
     id: 'openai',
@@ -102,6 +111,13 @@ export const ENGINE_CATALOG = [
     ]
   }
 ];
+
+export const ENGINE_CATALOG = ENGINE_CATALOG_DATA.sort((left, right) => {
+  const leftIndex = ENGINE_PRIORITY.indexOf(left.id);
+  const rightIndex = ENGINE_PRIORITY.indexOf(right.id);
+  return (leftIndex < 0 ? ENGINE_PRIORITY.length : leftIndex) -
+    (rightIndex < 0 ? ENGINE_PRIORITY.length : rightIndex);
+});
 
 export const ENGINE_BY_ID = Object.fromEntries(ENGINE_CATALOG.map(engine => [engine.id, engine]));
 

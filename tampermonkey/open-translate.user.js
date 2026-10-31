@@ -254,7 +254,8 @@ function protectGlossary(texts, entries) {
   const LANG_LABEL = Object.fromEntries(LANGUAGES);
 
   const ENGINE_NAMES = {
-    google: 'Google 翻译', mymemory: 'MyMemory', deepl: 'DeepL', microsoft: 'Microsoft 翻译',
+    microsoft: 'Microsoft 翻译', google: 'Google 翻译',
+    mymemory: 'MyMemory', deepl: 'DeepL',
     libre: 'LibreTranslate', openai: 'OpenAI', deepseek: 'DeepSeek', gemini: 'Google Gemini', claude: 'Claude',
     custom: '自定义接口'
   };
@@ -439,6 +440,16 @@ function protectGlossary(texts, entries) {
   // ---------------------------------------------------------------- utilities
 
   const clean = text => String(text || '').replace(/\s+/g, ' ').trim();
+  const translationText = text => String(text || '').replace(/\u00a0/g, ' ').trim();
+  const TRANSLATION_TIMEOUT = 12000;
+
+  function withTranslationTimeout(promise) {
+    return Promise.race([
+      promise,
+      new Promise((_, reject) => setTimeout(() => reject(new Error('翻译响应超时')), TRANSLATION_TIMEOUT))
+    ]);
+  }
+
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
   const host = location.hostname.replace(/^www\./, '');
 
@@ -491,6 +502,21 @@ function protectGlossary(texts, entries) {
     return {
       safe,
       restore: output => String(output).replace(/__\s*OT_PRIVATE\s*_(\d+)\s*__/gi, (whole, index) => values[Number(index)] ?? whole)
+    };
+  }
+
+  function protectLayout(text) {
+    const markers = [];
+    const protectedText = String(text).replace(/\r\n|\r|\n|\t/g, whitespace => {
+      const index = markers.length;
+      markers.push(whitespace);
+      return `\uE000OT_WS_${index}\uE001`;
+    });
+    return {
+      text: protectedText,
+      restore(value) {
+        return String(value || '').replace(/\uE000OT_WS_(\d+)\uE001/g, (_, index) => markers[Number(index)] || '');
+      }
     };
   }
 
@@ -877,8 +903,10 @@ function protectGlossary(texts, entries) {
       else pending.push({ text, index, key: keys[index] });
     });
     if (pending.length) {
-      const guard = config.privacy.maskSensitive ? maskAll(pending.map(item => item.text)) : null;
-      const masked = guard ? guard.safe : pending.map(item => item.text);
+      const layouts = pending.map(item => protectLayout(item.text));
+      const original = layouts.map(layout => layout.text);
+      const guard = config.privacy.maskSensitive ? maskAll(original) : null;
+      const masked = guard ? guard.safe : original;
       const protection = !isAI && config.glossary.enabled && config.glossary.machineTranslation
         ? protectGlossary(masked, config.glossaryEntries) : null;
       const output = await translateBatch(protection ? protection.safe : masked, config.targetLanguage, config);
@@ -890,7 +918,7 @@ function protectGlossary(texts, entries) {
           valid = restored.valid;
           value = valid ? restored.text : (await translateBatch([masked[index]], config.targetLanguage, config))[0] || '';
         }
-        const text = guard ? guard.restore(value) : value;
+        const text = layouts[index].restore(guard ? guard.restore(value) : value);
         results[pending[index].index] = text;
         if (text && valid) entries[pending[index].key] = { v: text, t: now };
       }
@@ -1718,6 +1746,20 @@ function protectGlossary(texts, entries) {
     const node = document.createElement('div');
     node.className = 'ot-translation ot-pending';
     node.setAttribute(MARK, 'translation');
+    const sourceStyle = getComputedStyle(el);
+    for (const property of [
+      'display', 'font-family', 'font-size', 'font-weight', 'font-style', 'font-variant',
+      'line-height', 'letter-spacing', 'word-spacing', 'text-align', 'text-indent',
+      'text-transform', 'white-space', 'word-break', 'overflow-wrap', 'direction',
+      'writing-mode', 'vertical-align'
+    ]) {
+      node.style.setProperty(property, sourceStyle.getPropertyValue(property));
+    }
+    if (sourceStyle.display !== 'inline') {
+      node.style.display = sourceStyle.display === 'inline-block' ? 'inline-block' : 'block';
+    }
+    node.style.margin = sourceStyle.margin;
+    node.style.padding = sourceStyle.padding;
     const sourceLength = clean(el.textContent).length;
     if (settings.style.loadingStyle === 'apple') {
       node.classList.add('ot-loading-skeleton');
@@ -1766,7 +1808,7 @@ function protectGlossary(texts, entries) {
     while (inflight < settings.concurrency && queue.length) {
       const batch = queue.splice(0, Math.max(1, settings.batchSize));
       inflight += 1;
-      requestTranslation(batch.map(item => item.text))
+      withTranslationTimeout(requestTranslation(batch.map(item => item.text)))
         .then(texts => batch.forEach((item, index) => settle(item.node, texts[index], texts[index] ? null : '空译文')))
         .catch(error => batch.forEach(item => settle(item.node, null, error?.message || '未知错误')))
         .finally(() => {
@@ -1778,7 +1820,7 @@ function protectGlossary(texts, entries) {
 
   function enqueue(el) {
     if (!active || translating.has(el)) return;
-    const text = clean(el.innerText || el.textContent);
+    const text = translationText(el.innerText || el.textContent);
     if (!text) return;
     translating.add(el);
     queue.push({ el, node: mountTranslation(el), text });
@@ -2422,7 +2464,7 @@ function protectGlossary(texts, entries) {
             ).join('')}</div>
             <div class="field"><label>翻译中占位样式</label><select data-k="style.loadingStyle">
               <option value="standard" ${settings.style.loadingStyle === 'standard' ? 'selected' : ''}>标准</option>
-              <option value="apple" ${settings.style.loadingStyle === 'apple' ? 'selected' : ''}>Apple Intelligence 彩色骨架</option>
+              <option value="apple" ${settings.style.loadingStyle === 'apple' ? 'selected' : ''}>Apple Intelligence 风格</option>
             </select></div>
             <div class="field"><label>字号 ${settings.style.fontSize}%</label><input type="range" data-k="style.fontSize" min="60" max="160" step="5" value="${settings.style.fontSize}"></div>
             <div class="field"><label>行高 ${Number(settings.style.lineHeight).toFixed(2)}</label><input type="range" data-k="style.lineHeight" min="1" max="2.4" step="0.05" value="${settings.style.lineHeight}"></div>
@@ -2826,8 +2868,9 @@ function protectGlossary(texts, entries) {
   function addStyle() {
     const style = document.createElement('style');
     style.textContent = `
-      .ot-translation { display: inline-block; max-width: 100%; font-family: inherit;
+      .ot-translation { display: var(--ot-display, inline-block); max-width: 100%; font-family: inherit;
         font-size: calc(1em * var(--ot-fs, 1)); font-weight: var(--ot-fw, 400); line-height: var(--ot-lh, 1.7);
+        white-space: pre-wrap; tab-size: 4;
         color: var(--ot-color, inherit); opacity: var(--ot-op, 1);
         margin: var(--ot-mt, 4px) 0 var(--ot-mb, 12px); padding: var(--ot-py, 2px) var(--ot-px, 8px);
         border-radius: var(--ot-radius, 6px); background: transparent; white-space: pre-wrap;

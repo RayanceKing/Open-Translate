@@ -18,6 +18,13 @@ import { parseCustomTerms, serializeGlossaryCsv } from './lib/glossary.js';
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 
+// Apple's on-device system translation only exists inside Safari's Web
+// Extension. Detect Safari by its extension URL scheme and hide the engine
+// (and its option in the engine dropdown) on every other browser.
+const IS_SAFARI = typeof chrome !== 'undefined' && !!chrome.runtime &&
+  (chrome.runtime.getURL?.('') || '').startsWith('safari-web-extension:');
+const VISIBLE_ENGINES = ENGINE_CATALOG.filter(engine => engine.id !== 'apple' || IS_SAFARI);
+
 const getPath = (object, path) => path.split('.').reduce((value, key) => (value == null ? value : value[key]), object);
 const setPath = (object, path, value) => {
   const keys = path.split('.');
@@ -168,7 +175,7 @@ function bindGlossary() {
 
 function renderEngineSelect() {
   const select = $('#engine');
-  select.innerHTML = ENGINE_CATALOG.map(engine => {
+  select.innerHTML = VISIBLE_ENGINES.map(engine => {
     const suffix = engine.tag === 'AI' ? ' · AI' : engine.tag === '免费' ? '' : ` · ${engine.tag}`;
     return `<option value="${engine.id}">${engine.name}${suffix}</option>`;
   }).join('');
@@ -255,7 +262,7 @@ function renderPreview() {
 
 function renderServices() {
   const container = $('#services-list');
-  container.innerHTML = ENGINE_CATALOG.map(engine => {
+  container.innerHTML = VISIBLE_ENGINES.map(engine => {
     const config = settings.engines[engine.id] || {};
     const serviceName = engine.id === 'custom' && config.name?.trim() ? config.name.trim() : engine.name;
     const fields = (Array.isArray(engine.fields) ? engine.fields : [])

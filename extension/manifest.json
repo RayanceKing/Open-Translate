@@ -3,7 +3,7 @@
   "name": "Open Translate",
   "version": "0.4.0",
   "description": "Privacy-conscious in-place bilingual web translation with switchable engines and AI translation.",
-  "permissions": ["storage", "activeTab", "contextMenus"],
+  "permissions": ["storage", "activeTab", "contextMenus", "nativeMessaging"],
   "host_permissions": ["http://*/*", "https://*/*"],
   "background": { "service_worker": "background.js", "type": "module" },
   "content_scripts": [
