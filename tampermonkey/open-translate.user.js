@@ -2056,7 +2056,11 @@ function protectGlossary(texts, entries) {
 
     .body { padding: 4px 20px 18px; overflow-y: auto; }
     .pane { display: none; }
-    .pane.active { display: block; }
+    .pane.active { display: block; animation: ot-pane-slide .22s ease-out; }
+    @keyframes ot-pane-slide {
+      from { opacity: .35; transform: translateX(10px); }
+      to { opacity: 1; transform: translateX(0); }
+    }
     .field { display: flex; align-items: center; gap: 14px; margin-bottom: 12px; }
     .field.col { display: block; }
     .field[hidden] { display: none; }
@@ -2100,14 +2104,29 @@ function protectGlossary(texts, entries) {
       background: linear-gradient(180deg, rgba(0,122,255,.20), rgba(0,122,255,.09));
       box-shadow: inset 0 1px 0 rgba(255,255,255,.55), 0 0 0 3px var(--dlg-accent-soft); }
 
-    .seg { display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px; padding: 4px;
+    .seg { position: relative; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 3px; padding: 4px;
       border: 1px solid var(--dlg-line); border-radius: 13px; background: var(--dlg-field);
       box-shadow: inset 0 1px 2px rgba(20,22,50,.06); flex: 1 1 auto; }
+    .seg:has(button[data-sub-mode]) { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .seg-glider { position: absolute; z-index: 0; top: 4px; left: 4px; width: 0; height: calc(100% - 8px);
+      border-radius: 10px; background: var(--dlg-glass-strong); pointer-events: none;
+      box-shadow: 0 5px 14px -8px rgba(20,24,60,.5), inset 0 1px 0 rgba(255,255,255,.9);
+      transition: transform .3s cubic-bezier(.32,1.24,.56,1), width .3s cubic-bezier(.32,1.24,.56,1); }
     .seg button { border: 0; background: transparent; padding: 6px 0; border-radius: 10px; font-size: 12px;
-      color: var(--dlg-muted); cursor: pointer; transition: background .16s ease, color .16s ease, box-shadow .16s ease; }
+      min-width: 0; position: relative; z-index: 1; color: var(--dlg-muted); cursor: pointer; transition: color .2s ease; }
     .seg button:hover { color: var(--dlg-text); }
-    .seg button.active { background: var(--dlg-glass-strong); color: var(--dlg-accent-ink); font-weight: 650;
-      box-shadow: 0 5px 14px -8px rgba(20,24,60,.5), inset 0 1px 0 rgba(255,255,255,.9); }
+    .seg button.active { color: var(--dlg-accent-ink); font-weight: 650; }
+    .seg button:active { transform: scale(.97); }
+    @keyframes ot-segment-select {
+      from { transform: scale(.96); opacity: .72; }
+      to { transform: scale(1); opacity: 1; }
+    }
+
+    @media (max-width: 560px) {
+      .field:has(.seg) { align-items: stretch; flex-wrap: wrap; }
+      .field:has(.seg) > label:not(.switch) { flex: 1 1 100%; }
+      .field:has(.seg) .seg { flex: 1 1 100%; width: 100%; }
+    }
 
     .switch { position: relative; width: 46px; height: 28px; flex: 0 0 auto; margin-left: auto; }
     .switch input { position: absolute; opacity: 0; width: 100%; height: 100%; margin: 0; cursor: pointer; }
@@ -2160,7 +2179,7 @@ function protectGlossary(texts, entries) {
         --dlg-shadow: 0 46px 100px -34px rgba(0,0,0,.85), 0 10px 30px rgba(0,0,0,.4);
       }
       .dialog { border-color: rgba(255,255,255,.10); }
-      .tab-glider, .seg button.active {
+      .tab-glider, .seg-glider {
         /* --dlg-glass-strong sits within ~1% luminance of the tab bar in dark,
            so the selected pill needs its own slightly brighter surface. */
         background: rgba(255,255,255,.13);
@@ -2175,8 +2194,11 @@ function protectGlossary(texts, entries) {
     }
 
     @media (prefers-reduced-motion: reduce) {
-      /* Keep the fade, drop the glide. */
-      .tab-glider { transition: opacity .2s ease; }
+      *, *::before, *::after {
+        animation: none !important;
+        transition: none !important;
+        scroll-behavior: auto !important;
+      }
     }
   `;
 
@@ -2341,7 +2363,7 @@ function protectGlossary(texts, entries) {
       <div class="dialog" role="dialog" aria-modal="true">
         <div class="head">
           <h2>Open Translate 设置</h2>
-          <span class="ver">v0.3.0</span>
+          <span class="ver">v0.4.0</span>
           <button class="close" type="button" aria-label="关闭">✕</button>
         </div>
         <div class="tabs">
@@ -2361,7 +2383,7 @@ function protectGlossary(texts, entries) {
             <div class="field"><label>目标语言</label><select data-k="targetLanguage">${LANGUAGES.map(
               ([code, label]) => `<option value="${code}" ${code === settings.targetLanguage ? 'selected' : ''}>${label}</option>`
             ).join('')}</select></div>
-            <div class="field"><label>显示模式</label><div class="seg">${[
+            <div class="field"><label>显示模式</label><div class="seg"><span class="seg-glider" aria-hidden="true"></span>${[
               ['bilingual', '双语对照'], ['translation', '仅译文'], ['hover', '悬停显示']
             ].map(([id, name]) => `<button type="button" data-mode="${id}" class="${settings.displayMode === id ? 'active' : ''}">${name}</button>`).join('')}</div></div>
             <div class="field"><label>打开页面自动翻译</label><label class="switch"><input type="checkbox" data-k="autoTranslate" ${settings.autoTranslate ? 'checked' : ''}><i></i></label></div>
@@ -2419,7 +2441,7 @@ function protectGlossary(texts, entries) {
 
           <div class="pane" data-pane="subtitles">
             <div class="field"><label>启用双语字幕</label><label class="switch"><input type="checkbox" data-k="subtitles.enabled" ${settings.subtitles.enabled ? 'checked' : ''}><i></i></label></div>
-            <div class="field"><label>显示方式</label><div class="seg">${[
+            <div class="field"><label>显示方式</label><div class="seg"><span class="seg-glider" aria-hidden="true"></span>${[
               ['bilingual', '双语'], ['translation', '仅译文']
             ].map(([id, name]) => `<button type="button" data-sub-mode="${id}" class="${settings.subtitles.mode === id ? 'active' : ''}">${name}</button>`).join('')}</div></div>
             <div class="field"><label>字号 ${settings.subtitles.fontSize}%</label><input type="range" data-k="subtitles.fontSize" min="60" max="200" step="5" value="${settings.subtitles.fontSize}"></div>
@@ -2492,6 +2514,21 @@ function protectGlossary(texts, entries) {
     ui.overlay.querySelectorAll('.tab').forEach(node => node.classList.toggle('active', node.dataset.tab === name));
     ui.overlay.querySelectorAll('.pane').forEach(pane => pane.classList.toggle('active', pane.dataset.pane === name));
     positionTabGlider(true);
+  }
+
+  function positionSegmentGlider(group, animate = true) {
+    const active = group?.querySelector('button.active');
+    const glider = group?.querySelector('.seg-glider');
+    if (!active || !glider) return;
+    const box = group.getBoundingClientRect();
+    const rect = active.getBoundingClientRect();
+    glider.style.width = `${rect.width.toFixed(2)}px`;
+    glider.style.transform = `translateX(${(rect.left - box.left - 1).toFixed(2)}px)`;
+    if (!animate) {
+      glider.style.transition = 'none';
+      void glider.offsetWidth;
+      glider.style.removeProperty('transition');
+    }
   }
 
   function bindSettingsUi() {
@@ -2598,6 +2635,7 @@ function protectGlossary(texts, entries) {
         persist();
         applyAppearance();
         root.querySelectorAll('.seg button[data-mode]').forEach(node => node.classList.toggle('active', node === button));
+        positionSegmentGlider(button.closest('.seg'));
       });
     });
 
@@ -2607,8 +2645,10 @@ function protectGlossary(texts, entries) {
         persist();
         applySubtitleStyle();
         root.querySelectorAll('.seg button[data-sub-mode]').forEach(node => node.classList.toggle('active', node === button));
+        positionSegmentGlider(button.closest('.seg'));
       });
     });
+    root.querySelectorAll('.seg').forEach(group => positionSegmentGlider(group, false));
 
     const subToggle = root.querySelector('[data-sub-toggle]');
     if (subToggle) {
