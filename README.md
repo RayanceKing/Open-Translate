@@ -24,6 +24,31 @@
 
 Safari 14+ 可用 Xcode 的 **Safari Web Extension Converter** 导入 `extension/` 目录后签名运行。打包时请确认「Website Access」允许目标站点。
 
+### 方式三：Swift 原生应用（iOS / macOS）
+
+仓库内的 [`openTranslate/`](openTranslate/) 是 Swift + Safari Web Extension 原生工程，使用同一套 `extension/` 翻译逻辑，支持：
+
+- iOS 17+ 与 macOS 12+；
+- Safari 网页注入、弹出面板、完整设置页和本地术语库；
+- Apple 原生签名、归档与 App Store / TestFlight 分发；
+- macOS 沙盒与 Hardened Runtime，网络权限已在工程中启用。
+
+使用 Xcode 打开 [`openTranslate/openTranslate.xcodeproj`](openTranslate/openTranslate.xcodeproj)，选择 `openTranslate (iOS)` 或 `openTranslate (macOS)` scheme，设置自己的 Team 和 Bundle Identifier 后运行或 Archive。首次安装后需在 Safari 的「扩展」设置中启用 Open Translate，并授予目标网站访问权限。
+
+`openTranslate/Shared (Extension)/Resources/` 是 Safari 扩展打包副本；修改浏览器扩展后，请同步 `extension/` 中的资源，再重新构建原生工程。原生版本使用 Safari 兼容的 background scripts 配置，不依赖 Chrome 专有的 service worker 启动方式。
+
+## 界面预览
+
+蓝浅色主题下的界面效果：
+
+**设置对话框（dialog）**
+
+![设置对话框 - 蓝浅色主题](dialog-blue-light.png)
+
+**选项设置页（options）**
+
+![选项设置页 - 蓝浅色主题](options-blue-light.png)
+
 ## 功能
 
 ### 翻译引擎

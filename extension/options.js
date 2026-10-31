@@ -1,5 +1,6 @@
 import {
   APP_VERSION,
+  AI_ENGINES,
   DEFAULT_PROMPT,
   DEFAULT_SETTINGS,
   DISPLAY_MODES,
@@ -24,6 +25,27 @@ const setPath = (object, path, value) => {
   const target = keys.reduce((node, key) => (node[key] ??= {}), object);
   target[last] = value;
 };
+
+// Safari's `chrome` shim does NOT return a promise from runtime.sendMessage and
+// requires a callback, so route every call through this helper. It also reports
+// `chrome.runtime.lastError` instead of swallowing it.
+function sendMessage(message) {
+  return new Promise((resolve, reject) => {
+    try {
+      if (typeof chrome?.runtime?.sendMessage !== 'function') {
+        reject(new Error('chrome.runtime.sendMessage 不可用'));
+        return;
+      }
+      chrome.runtime.sendMessage(message, response => {
+        const lastError = chrome.runtime.lastError;
+        if (lastError) reject(new Error(lastError.message || '消息发送失败'));
+        else resolve(response);
+      });
+    } catch (error) {
+      reject(error);
+    }
+  });
+}
 
 let settings = normalizeSettings(null);
 let saveTimer = null;
@@ -235,7 +257,8 @@ function renderServices() {
   const container = $('#services-list');
   container.innerHTML = ENGINE_CATALOG.map(engine => {
     const config = settings.engines[engine.id] || {};
-    const fields = engine.fields
+    const serviceName = engine.id === 'custom' && config.name?.trim() ? config.name.trim() : engine.name;
+    const fields = (Array.isArray(engine.fields) ? engine.fields : [])
       .map(field => {
         const depends = field.dependsOn ? ` data-depends="${field.dependsOn}"` : '';
         const hidden = field.dependsOn && !config[field.dependsOn] ? ' hidden' : '';
@@ -260,7 +283,7 @@ function renderServices() {
 
     return `<div class="service ${settings.engine === engine.id ? 'is-active' : ''}" data-service="${engine.id}">
       <div class="service-head">
-        <span class="service-name">${engine.name}</span>
+        <span class="service-name">${serviceName}</span>
         <span class="tag ${engine.tag === 'AI' ? 'is-ai' : ''}">${engine.tag}</span>
         <span style="flex:1"></span>
         <button type="button" class="ghost" data-use="${engine.id}">${settings.engine === engine.id ? '使用中' : '使用'}</button>
@@ -322,6 +345,17 @@ function syncServiceDeps(card) {
 
 function syncServiceActive() {
   $$('[data-service]').forEach(card => card.classList.toggle('is-active', card.dataset.service === settings.engine));
+}
+
+function showSelectedService() {
+  if (!AI_ENGINES.includes(settings.engine)) return;
+  const section = $('#services');
+  const card = $(`[data-service="${settings.engine}"]`);
+  section?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  requestAnimationFrame(() => {
+    card?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    card?.querySelector('input')?.focus({ preventScroll: true });
+  });
   $$('[data-use]').forEach(button => {
     const current = button.dataset.use === settings.engine;
     button.textContent = current ? '使用中' : '使用';
@@ -336,7 +370,7 @@ async function testEngine(engine, button) {
   button.disabled = true;
   try {
     await flushSave();
-    const response = await chrome.runtime.sendMessage({ type: 'test-engine', engine });
+    const response = await sendMessage({ type: 'test-engine', engine });
     if (response?.error) throw new Error(response.error);
     status.className = 'service-status is-ok';
     status.textContent = `成功：${response.text}`;
@@ -381,6 +415,8 @@ function syncControls() {
 
   $('#engine').value = settings.engine;
   $('#kbd-toggle').textContent = settings.shortcuts.toggle;
+  const toggleChoice = $('.shortcut-choice');
+  if (toggleChoice) toggleChoice.value = ['Touch3', 'Touch4'].includes(settings.shortcuts.toggle) ? settings.shortcuts.toggle : '';
   $('#kbd-selection').textContent = settings.shortcuts.selection;
   $('#kbd-subtitles').textContent = settings.subtitles.shortcut || '未设置';
   syncDisplayModes();
@@ -415,6 +451,7 @@ function bindControls() {
       if (path === 'engine') {
         updateEngineNote();
         syncServiceActive();
+        showSelectedService();
       }
       if (path.startsWith('shortcuts.')) {
         $('#kbd-toggle').textContent = settings.shortcuts.toggle;
@@ -428,6 +465,13 @@ function bindControls() {
 // ---------------------------------------------------------------- shortcuts
 
 function bindShortcutInputs() {
+  const toggleChoice = $('.shortcut-choice');
+  toggleChoice?.addEventListener('change', () => {
+    if (!toggleChoice.value) return;
+    setPath(settings, toggleChoice.dataset.path, toggleChoice.value);
+    $('#shortcut-toggle').value = toggleChoice.value;
+    scheduleSave();
+  });
   $$('.shortcut').forEach(input => {
     input.addEventListener('focus', () => input.classList.add('is-capturing'));
     input.addEventListener('blur', () => input.classList.remove('is-capturing'));
@@ -449,6 +493,7 @@ function bindShortcutInputs() {
       if (!modifiers.length || ['Alt', 'Control', 'Shift', 'Meta'].includes(event.key)) return;
       const combo = [...modifiers, key.toUpperCase()].join('+');
       input.value = combo;
+      if (input.id === 'shortcut-toggle' && toggleChoice) toggleChoice.value = '';
       setPath(settings, input.dataset.path, combo);
       $('#kbd-toggle').textContent = settings.shortcuts.toggle;
       $('#kbd-selection').textContent = settings.shortcuts.selection;
@@ -467,13 +512,17 @@ function applyTheme() {
   const mode = settings.ui.theme || 'auto';
   const resolved = mode === 'auto' ? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') : mode;
   document.documentElement.dataset.theme = resolved;
-  $('#theme-toggle').textContent = `外观：${THEME_LABEL[mode]}`;
+  const toggle = $('#theme-toggle');
+  toggle.dataset.themeMode = mode;
+  $('.theme-icon', toggle).textContent = mode === 'auto' ? '🌓' : mode === 'dark' ? '🌙' : '🌞';
+  toggle.title = `外观：${THEME_LABEL[mode]}`;
+  toggle.setAttribute('aria-label', toggle.title);
 }
 
 function bindTheme() {
   $('#theme-toggle').addEventListener('click', () => {
-    const index = THEMES.indexOf(settings.ui.theme || 'auto');
-    settings.ui.theme = THEMES[(index + 1) % THEMES.length];
+    const current = THEMES.includes(settings.ui.theme) ? settings.ui.theme : 'auto';
+    settings.ui.theme = THEMES[(THEMES.indexOf(current) + 1) % THEMES.length];
     applyTheme();
     scheduleSave();
   });
@@ -535,7 +584,7 @@ async function refreshCacheStats() {
   const label = $('#cache-count');
   if (!label) return;
   try {
-    const stats = await chrome.runtime.sendMessage({ type: 'cache-stats' });
+    const stats = await sendMessage({ type: 'cache-stats' });
     if (!stats || stats.error) throw new Error(stats?.error || 'unavailable');
     label.textContent = stats.count ? `${stats.count} 条译文` : '暂无缓存';
   } catch {
@@ -549,7 +598,7 @@ function bindCache() {
     const button = $('#clear-cache');
     button.disabled = true;
     try {
-      await chrome.runtime.sendMessage({ type: 'clear-cache' });
+      await sendMessage({ type: 'clear-cache' });
       await refreshCacheStats();
       toast('翻译缓存已清空');
     } catch {
@@ -564,11 +613,30 @@ function bindCache() {
 
 function bindNavigation() {
   const sections = $$('.section');
+  const nav = $('#nav');
+  const items = $$('.nav-item');
+  const centerActiveItem = item => {
+    if (!item || nav.scrollWidth <= nav.clientWidth) return;
+    const target = item.offsetLeft - (nav.clientWidth - item.offsetWidth) / 2;
+    nav.scrollTo({ left: Math.max(0, target), behavior: 'smooth' });
+  };
+  const setActiveItem = id => {
+    const item = items.find(candidate => candidate.dataset.target === id);
+    items.forEach(candidate => candidate.classList.toggle('is-active', candidate === item));
+    centerActiveItem(item);
+  };
+
+  items.forEach(item => {
+    item.addEventListener('click', () => {
+      requestAnimationFrame(() => centerActiveItem(item));
+    });
+  });
+
   const observer = new IntersectionObserver(
     entries => {
       entries.forEach(entry => {
         if (!entry.isIntersecting) return;
-        $$('.nav-item').forEach(item => item.classList.toggle('is-active', item.dataset.target === entry.target.id));
+        setActiveItem(entry.target.id);
       });
     },
     { rootMargin: '-15% 0px -70% 0px', threshold: 0 }
@@ -592,25 +660,35 @@ function hydrate() {
 }
 
 async function init() {
-  settings = await loadSettings();
+  try {
+    settings = await loadSettings();
 
-  renderEngineSelect();
-  renderLanguages();
-  renderDisplayModes();
-  renderSubtitleModes();
-  renderPresets();
-  bindServices();
-  bindControls();
-  bindGlossary();
-  bindShortcutInputs();
-  bindTheme();
-  bindTransfer();
-  bindCache();
-  bindNavigation();
+    renderEngineSelect();
+    renderLanguages();
+    renderDisplayModes();
+    renderSubtitleModes();
+    renderPresets();
+    bindServices();
+    bindControls();
+    bindGlossary();
+    bindShortcutInputs();
+    bindTheme();
+    bindTransfer();
+    bindCache();
+    bindNavigation();
 
-  $('#version-label').textContent = `v${APP_VERSION}`;
-  $('#about-version').textContent = `v${APP_VERSION}`;
-  hydrate();
+    const versionLabel = $('#version-label');
+    if (versionLabel) versionLabel.textContent = `v${APP_VERSION}`;
+    $('#about-version').textContent = `v${APP_VERSION}`;
+    hydrate();
+  } catch (error) {
+    console.error('Open Translate settings initialization failed', error);
+    const list = $('#services-list');
+    if (list && !list.children.length) {
+      const detail = error?.message ? `（${error.message}）` : '';
+      list.innerHTML = `<div class="card error-card">翻译服务加载失败，请重新打开设置页。${detail}</div>`;
+    }
+  }
 }
 
 init();

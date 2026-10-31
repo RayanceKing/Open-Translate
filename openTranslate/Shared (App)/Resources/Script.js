@@ -21,4 +21,9 @@ function openPreferences() {
     webkit.messageHandlers.controller.postMessage("open-preferences");
 }
 
+function openSettings() {
+    webkit.messageHandlers.controller.postMessage("open-settings");
+}
+
 document.querySelector("button.open-preferences").addEventListener("click", openPreferences);
+document.querySelector("button.open-settings").addEventListener("click", openSettings);

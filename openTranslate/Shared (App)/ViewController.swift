@@ -60,8 +60,18 @@ class ViewController: PlatformViewController, WKNavigationDelegate, WKScriptMess
     }
 
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
-#if os(macOS)
-        if (message.body as! String != "open-preferences") {
+        guard let action = message.body as? String else {
+            return
+        }
+
+#if os(iOS)
+        guard action == "open-settings",
+              let settingsURL = URL(string: "App-Prefs:root=SAFARI") else {
+            return
+        }
+        UIApplication.shared.open(settingsURL)
+#elseif os(macOS)
+        guard action == "open-preferences" else {
             return
         }
 

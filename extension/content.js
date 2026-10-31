@@ -171,8 +171,29 @@
 
   // ---------------------------------------------------------------- messaging
 
+  // Safari's `chrome` shim does not return a promise from runtime.sendMessage
+  // and requires a callback, so route every call through this helper and surface
+  // chrome.runtime.lastError instead of swallowing it.
+  function sendMessage(message) {
+    return new Promise((resolve, reject) => {
+      try {
+        if (typeof chrome?.runtime?.sendMessage !== 'function') {
+          reject(new Error('chrome.runtime.sendMessage 不可用'));
+          return;
+        }
+        chrome.runtime.sendMessage(message, response => {
+          const lastError = chrome.runtime.lastError;
+          if (lastError) reject(new Error(lastError.message || '消息发送失败'));
+          else resolve(response);
+        });
+      } catch (error) {
+        reject(error);
+      }
+    });
+  }
+
   async function requestTranslation(texts) {
-    const response = await chrome.runtime.sendMessage({ type: 'translate', texts, target: settings.targetLanguage });
+    const response = await sendMessage({ type: 'translate', texts, target: settings.targetLanguage });
     if (!response) throw new Error('后台没有响应，请重新加载页面');
     if (response.error) throw new Error(response.error);
     return response.texts || [];
@@ -1259,7 +1280,7 @@
   }
 
   function openOptions() {
-    chrome.runtime.sendMessage({ type: 'open-options' }).catch(() => {});
+    sendMessage({ type: 'open-options' }).catch(() => {});
   }
 
   function dockPosition() {
@@ -1418,6 +1439,27 @@
       closeBubble();
     }
   });
+
+  let touchGesture = null;
+  document.addEventListener('touchstart', event => {
+    const count = event.touches.length;
+    if ((count === 3 || count === 4) && settings.shortcuts.toggle === `Touch${count}`) {
+      touchGesture = { count, x: event.touches[0].clientX, y: event.touches[0].clientY };
+    } else {
+      touchGesture = null;
+    }
+  }, { passive: true });
+  document.addEventListener('touchend', event => {
+    if (!touchGesture || event.touches.length !== 0) return;
+    const gesture = touchGesture;
+    touchGesture = null;
+    if (settings.shortcuts.toggle !== `Touch${gesture.count}`) return;
+    event.preventDefault();
+    toggle();
+  }, { passive: false });
+  document.addEventListener('touchcancel', () => {
+    touchGesture = null;
+  }, { passive: true });
 
   // ---------------------------------------------------------------- bootstrap
 

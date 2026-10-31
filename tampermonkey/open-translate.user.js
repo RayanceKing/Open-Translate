@@ -255,12 +255,14 @@ function protectGlossary(texts, entries) {
 
   const ENGINE_NAMES = {
     google: 'Google 翻译', mymemory: 'MyMemory', deepl: 'DeepL', microsoft: 'Microsoft 翻译',
-    libre: 'LibreTranslate', openai: 'OpenAI', deepseek: 'DeepSeek', gemini: 'Google Gemini', claude: 'Claude'
+    libre: 'LibreTranslate', openai: 'OpenAI', deepseek: 'DeepSeek', gemini: 'Google Gemini', claude: 'Claude',
+    custom: '自定义接口'
   };
 
   const ENGINE_SHORT = {
     google: 'Google', mymemory: 'MyMemory', deepl: 'DeepL', microsoft: '微软',
-    libre: 'Libre', openai: 'OpenAI', deepseek: 'DeepSeek', gemini: 'Gemini', claude: 'Claude'
+    libre: 'Libre', openai: 'OpenAI', deepseek: 'DeepSeek', gemini: 'Gemini', claude: 'Claude',
+    custom: '自定义'
   };
 
   const ENGINE_FIELDS = {
@@ -296,10 +298,16 @@ function protectGlossary(texts, entries) {
     claude: [
       { key: 'apiKey', label: 'API Key', type: 'password', placeholder: 'sk-ant-...' },
       { key: 'model', label: '模型', type: 'text', placeholder: 'claude-3-5-haiku-latest' }
+    ],
+    custom: [
+      { key: 'name', label: '服务名称', type: 'text', placeholder: '我的翻译服务' },
+      { key: 'baseUrl', label: '接口地址', type: 'text', placeholder: 'https://example.com/v1' },
+      { key: 'apiKey', label: 'API Key', type: 'password', placeholder: '可留空' },
+      { key: 'model', label: '模型', type: 'text', placeholder: 'gpt-4o-mini' }
     ]
   };
 
-  const AI_ENGINES = ['openai', 'deepseek', 'gemini', 'claude'];
+  const AI_ENGINES = ['openai', 'deepseek', 'gemini', 'claude', 'custom'];
 
   const DEFAULT_PROMPT = [
     'You are a professional translator. Translate the text into {{target}}.',
@@ -333,6 +341,7 @@ function protectGlossary(texts, entries) {
     },
     ai: { prompt: DEFAULT_PROMPT, glossary: '', temperature: 0.2 },
     glossary: { enabled: true, machineTranslation: false, libraryIds: [], customTerms: '', customTargetLanguage: '*' },
+    shortcuts: { toggle: 'Alt+T', selection: 'Alt+Shift+T' },
     engines: {
       google: {}, mymemory: {},
       deepl: { key: '', pro: false },
@@ -341,7 +350,8 @@ function protectGlossary(texts, entries) {
       openai: { baseUrl: 'https://api.openai.com/v1', apiKey: '', model: 'gpt-4o-mini' },
       deepseek: { baseUrl: 'https://api.deepseek.com/v1', apiKey: '', model: 'deepseek-chat' },
       gemini: { apiKey: '', model: 'gemini-2.0-flash' },
-      claude: { apiKey: '', model: 'claude-3-5-haiku-latest' }
+      claude: { apiKey: '', model: 'claude-3-5-haiku-latest' },
+      custom: { name: '', baseUrl: '', apiKey: '', model: '' }
     },
     siteRules: { blacklist: [], alwaysTranslate: [] },
     subtitles: { enabled: true, mode: 'bilingual', fontSize: 100, position: 10, background: true, shortcut: 'Alt+S' },
@@ -710,9 +720,10 @@ function protectGlossary(texts, entries) {
       return Array.isArray(result) ? result : [String(result || '')];
     }
 
-    if (engine === 'openai' || engine === 'deepseek') {
-      if (!cfg.apiKey) throw new Error('尚未填写 API Key');
-      const base = trimSlash(cfg.baseUrl) || 'https://api.openai.com/v1';
+    if (engine === 'openai' || engine === 'deepseek' || engine === 'custom') {
+      if (engine !== 'custom' && !cfg.apiKey) throw new Error('尚未填写 API Key');
+      const base = trimSlash(cfg.baseUrl) || (engine === 'custom' ? '' : (engine === 'deepseek' ? 'https://api.deepseek.com/v1' : 'https://api.openai.com/v1'));
+      if (!base) throw new Error('尚未填写自定义接口地址');
       return runAi(async prompt => {
         const data = await http({
           url: `${base}/chat/completions`,
@@ -2357,7 +2368,12 @@ function protectGlossary(texts, entries) {
             <div class="field"><label>显示悬浮按钮</label><label class="switch"><input type="checkbox" data-k="ui.showFloatingButton" ${settings.ui.showFloatingButton ? 'checked' : ''}><i></i></label></div>
             <div class="field"><label>屏蔽敏感信息</label><label class="switch"><input type="checkbox" data-k="privacy.maskSensitive" ${settings.privacy.maskSensitive ? 'checked' : ''}><i></i></label></div>
             <div class="field"><label>翻译缓存</label><span data-cache-count class="muted-inline">${cacheCount()} 条</span><button class="btn" type="button" data-clear-cache>清空</button></div>
-            <p class="hint">邮箱、电话与常见 API Token 会在发送前替换为占位符，返回后还原。快捷键：Alt+T 翻译 / 还原，Alt+Shift+T 翻译选中文本。</p>
+            <div class="field"><label>翻译 / 还原快捷键</label><select data-k="shortcuts.toggle">
+              <option value="Alt+T" ${settings.shortcuts.toggle === 'Alt+T' ? 'selected' : ''}>键盘：Alt+T</option>
+              <option value="Touch3" ${settings.shortcuts.toggle === 'Touch3' ? 'selected' : ''}>三指轻触</option>
+              <option value="Touch4" ${settings.shortcuts.toggle === 'Touch4' ? 'selected' : ''}>四指轻触</option>
+            </select></div>
+            <p class="hint">邮箱、电话与常见 API Token 会在发送前替换为占位符，返回后还原。选中网页文字后可使用 Alt+Shift+T 翻译。</p>
           </div>
 
           <div class="pane" data-pane="style">
@@ -2690,8 +2706,8 @@ function protectGlossary(texts, entries) {
 
   // ---------------------------------------------------------------- shortcuts
 
-  function matchesSubShortcut(event) {
-    const combo = String(settings.subtitles.shortcut || '').toLowerCase();
+  function matchesShortcut(event, shortcut) {
+    const combo = String(shortcut || '').toLowerCase();
     if (!combo) return false;
     const parts = combo.split('+').map(part => part.trim()).filter(Boolean);
     const key = parts.pop();
@@ -2704,12 +2720,12 @@ function protectGlossary(texts, entries) {
   }
 
   document.addEventListener('keydown', event => {
-    if (matchesSubShortcut(event)) {
+    if (matchesShortcut(event, settings.subtitles.shortcut)) {
       event.preventDefault();
       toggleSubtitles();
       return;
     }
-    const isToggle = event.altKey && !event.ctrlKey && !event.metaKey && event.code === 'KeyT';
+    const isToggle = matchesShortcut(event, settings.shortcuts.toggle);
     if (!isToggle) {
       if (event.key === 'Escape') {
         closeBubble();
@@ -2721,6 +2737,27 @@ function protectGlossary(texts, entries) {
     if (event.shiftKey) translateSelection();
     else toggle();
   });
+
+  let touchGesture = null;
+  document.addEventListener('touchstart', event => {
+    const count = event.touches.length;
+    if ((count === 3 || count === 4) && settings.shortcuts.toggle === `Touch${count}`) {
+      touchGesture = count;
+    } else {
+      touchGesture = null;
+    }
+  }, { passive: true });
+  document.addEventListener('touchend', event => {
+    if (!touchGesture || event.touches.length !== 0) return;
+    const count = touchGesture;
+    touchGesture = null;
+    if (settings.shortcuts.toggle !== `Touch${count}`) return;
+    event.preventDefault();
+    toggle();
+  }, { passive: false });
+  document.addEventListener('touchcancel', () => {
+    touchGesture = null;
+  }, { passive: true });
 
   // ---------------------------------------------------------------- styles & boot
 

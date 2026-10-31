@@ -1,0 +1,564 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="auto">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Open Translate · 设置</title>
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="logo">译</div>
+    </div>
+
+    <nav class="nav" id="nav">
+      <a class="nav-item is-active" href="#general" data-target="general">通用</a>
+      <a class="nav-item" href="#appearance" data-target="appearance">显示样式</a>
+      <a class="nav-item" href="#subtitles" data-target="subtitles">视频字幕</a>
+      <a class="nav-item" href="#services" data-target="services">翻译服务</a>
+      <a class="nav-item" href="#ai" data-target="ai">AI 翻译</a>
+      <a class="nav-item" href="#glossary" data-target="glossary">术语库</a>
+      <a class="nav-item" href="#privacy" data-target="privacy">隐私与安全</a>
+      <a class="nav-item" href="#sites" data-target="sites">站点规则</a>
+      <a class="nav-item" href="#about" data-target="about">关于</a>
+    </nav>
+
+    <div class="sidebar-foot">
+      <button class="theme-toggle" id="theme-toggle" type="button" title="外观：跟随系统" aria-label="外观：跟随系统">
+        <span class="theme-icon" aria-hidden="true">🌓</span>
+      </button>
+    </div>
+  </aside>
+
+  <main class="main">
+    <header class="page-head">
+      <div>
+        <h1>设置</h1>
+        <p class="subtitle">所有配置只保存在本机浏览器中，不会上传到任何服务器。</p>
+      </div>
+      <div class="head-actions">
+        <span class="pill" id="version-label">v0.4.0</span>
+        <span class="save-hint" id="save-hint">已保存</span>
+        <button class="ghost" id="reset" type="button">恢复默认</button>
+      </div>
+    </header>
+
+    <!-- ============================ 通用 ============================ -->
+    <section class="section" id="general">
+      <div class="section-head">
+        <h2>通用</h2>
+        <p>决定用哪个引擎翻译、翻译成什么语言，以及译文如何呈现。</p>
+      </div>
+
+      <div class="card">
+        <div class="row">
+          <div class="row-label">
+            <label for="engine">翻译引擎</label>
+            <p id="engine-note">选择翻译服务。AI 引擎更自然，但需要填写密钥。</p>
+          </div>
+          <div class="row-control">
+            <select id="engine" data-path="engine"></select>
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="row-label">
+            <label for="targetLanguage">目标语言</label>
+            <p>译文使用的语言。</p>
+          </div>
+          <div class="row-control">
+            <select id="targetLanguage" data-path="targetLanguage"></select>
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="row-label">
+            <label for="sourceLanguage">源语言</label>
+            <p>通常保持自动检测即可。</p>
+          </div>
+          <div class="row-control">
+            <select id="sourceLanguage" data-path="sourceLanguage"></select>
+          </div>
+        </div>
+
+        <div class="row column">
+          <div class="row-label">
+            <label>显示模式</label>
+            <p>译文和原文的关系。</p>
+          </div>
+          <div class="row-control">
+            <div class="radio-grid" id="display-modes"></div>
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="row-label">
+            <label for="autoTranslate">打开页面自动翻译</label>
+            <p>进入文章页后直接开始翻译，无需点击。可在「站点规则」中单独指定。</p>
+          </div>
+          <div class="row-control">
+            <label class="switch">
+              <input type="checkbox" id="autoTranslate" data-path="autoTranslate">
+              <span class="slider"></span>
+            </label>
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="row-label">
+            <label for="showFloatingButton">显示页面悬浮按钮</label>
+            <p>关闭后只能通过快捷键或扩展图标触发。</p>
+          </div>
+          <div class="row-control">
+            <label class="switch">
+              <input type="checkbox" id="showFloatingButton" data-path="ui.showFloatingButton">
+              <span class="slider"></span>
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">性能</div>
+        <div class="row">
+          <div class="row-label">
+            <label for="batchSize">每批段落数</label>
+            <p>AI 引擎建议 4–6，一次请求翻译多段更快。</p>
+          </div>
+          <div class="row-control">
+            <select id="batchSize" data-path="batchSize" data-type="number">
+              <option value="1">1 段</option>
+              <option value="2">2 段</option>
+              <option value="4">4 段</option>
+              <option value="6">6 段</option>
+              <option value="8">8 段</option>
+              <option value="10">10 段</option>
+            </select>
+          </div>
+        </div>
+        <div class="row">
+          <div class="row-label">
+            <label for="concurrency">并发请求数</label>
+            <p>过高容易被免费接口限流。</p>
+          </div>
+          <div class="row-control">
+            <select id="concurrency" data-path="concurrency" data-type="number">
+              <option value="1">1</option>
+              <option value="2">2</option>
+              <option value="3">3</option>
+              <option value="4">4</option>
+              <option value="5">5</option>
+            </select>
+          </div>
+        </div>
+        <div class="row shortcut-row">
+          <div class="row-label">
+            <label for="shortcut-toggle">翻译 / 还原快捷键</label>
+            <p>点击输入框后直接按下组合键，也可选择移动端三指或四指轻触。</p>
+          </div>
+          <div class="row-control shortcut-controls">
+            <input class="shortcut" id="shortcut-toggle" data-path="shortcuts.toggle" readonly placeholder="Alt+T">
+            <select class="shortcut-choice" data-path="shortcuts.toggle" aria-label="移动端快捷方式">
+              <option value="">键盘组合键</option>
+              <option value="Touch3">三指轻触</option>
+              <option value="Touch4">四指轻触</option>
+            </select>
+          </div>
+        </div>
+        <div class="row">
+          <div class="row-label">
+            <label for="shortcut-selection">翻译选中文本</label>
+            <p>选中网页文字后按下即可弹出译文。</p>
+          </div>
+          <div class="row-control">
+            <input class="shortcut" id="shortcut-selection" data-path="shortcuts.selection" readonly placeholder="Alt+Shift+T">
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================ 显示样式 ============================ -->
+    <section class="section" id="appearance">
+      <div class="section-head">
+        <h2>显示样式</h2>
+        <p>调整译文的外观，让它在原页面里看起来舒服。所有改动都会实时反映在下方预览中。</p>
+      </div>
+
+      <div class="card">
+        <div class="card-title">样式预设</div>
+        <div class="preset-grid" id="presets"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">细节调整</div>
+
+        <div class="row">
+          <div class="row-label"><label for="style-fontSize">字号</label><p>相对原文的百分比。</p></div>
+          <div class="row-control slider-control">
+            <input type="range" id="style-fontSize" data-path="style.fontSize" min="60" max="160" step="5">
+            <output data-for="style-fontSize">100%</output>
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="row-label"><label for="style-lineHeight">行高</label><p>长段落可适当调大。</p></div>
+          <div class="row-control slider-control">
+            <input type="range" id="style-lineHeight" data-path="style.lineHeight" min="1" max="2.4" step="0.05">
+            <output data-for="style.lineHeight">1.70</output>
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="row-label"><label for="style-opacity">不透明度</label><p>降低可以让原文更突出。</p></div>
+          <div class="row-control slider-control">
+            <input type="range" id="style-opacity" data-path="style.opacity" min="30" max="100" step="5">
+            <output data-for="style.opacity">100%</output>
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="row-label"><label for="style-fontWeight">字重</label><p>与原文区分度。</p></div>
+          <div class="row-control">
+            <select id="style-fontWeight" data-path="style.fontWeight" data-type="number">
+              <option value="300">细体 300</option>
+              <option value="400">常规 400</option>
+              <option value="500">中等 500</option>
+              <option value="600">半粗 600</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="row-label"><label>译文颜色</label><p>默认继承原网页文字颜色。</p></div>
+          <div class="row-control inline">
+            <select id="style-colorMode" data-path="style.colorMode">
+              <option value="inherit">继承原文</option>
+              <option value="custom">自定义</option>
+            </select>
+            <input type="color" id="style-color" data-path="style.color" aria-label="译文颜色">
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="row-label"><label for="style-accent">主题色</label><p>边框、下划线、引用线使用这个颜色。</p></div>
+          <div class="row-control">
+            <input type="color" id="style-accent" data-path="style.accent" aria-label="主题色">
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="row-label"><label for="style-background">背景色</label><p>卡片、引用块、高亮样式使用这个颜色。</p></div>
+          <div class="row-control">
+            <input type="color" id="style-background" data-path="style.background" aria-label="背景色">
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="row-label"><label for="style-radius">圆角</label></div>
+          <div class="row-control slider-control">
+            <input type="range" id="style-radius" data-path="style.radius" min="0" max="20" step="1">
+            <output data-for="style.radius">6px</output>
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="row-label"><label for="style-paddingX">左右内边距</label></div>
+          <div class="row-control slider-control">
+            <input type="range" id="style-paddingX" data-path="style.paddingX" min="0" max="24" step="1">
+            <output data-for="style.paddingX">8px</output>
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="row-label"><label for="style-paddingY">上下内边距</label></div>
+          <div class="row-control slider-control">
+            <input type="range" id="style-paddingY" data-path="style.paddingY" min="0" max="16" step="1">
+            <output data-for="style.paddingY">2px</output>
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="row-label"><label for="style-marginTop">与原文的间距</label></div>
+          <div class="row-control slider-control">
+            <input type="range" id="style-marginTop" data-path="style.marginTop" min="0" max="24" step="1">
+            <output data-for="style.marginTop">4px</output>
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="row-label"><label for="style-marginBottom">与下一段的间距</label></div>
+          <div class="row-control slider-control">
+            <input type="range" id="style-marginBottom" data-path="style.marginBottom" min="0" max="32" step="1">
+            <output data-for="style.marginBottom">12px</output>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">实时预览</div>
+        <div class="preview" id="preview">
+          <p class="preview-original">Translation should feel like it was written by the author, not appended by a machine.</p>
+          <div class="preview-translation">译文应该读起来像是作者本人写的，而不是机器附加在后面的。</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================ 视频字幕 ============================ -->
+    <section class="section" id="subtitles">
+      <div class="section-head">
+        <h2>视频字幕</h2>
+        <p>为网页视频加载双语字幕：自动读取 YouTube 的字幕轨或页面里的 <code>&lt;track&gt;</code>，按播放进度实时显示原文与译文。</p>
+      </div>
+
+      <div class="card">
+        <div class="row">
+          <div class="row-label">
+            <label for="subtitles-enabled">启用双语字幕</label>
+            <p>视频开始播放时自动加载字幕轨。单个页面上可以用快捷键临时开关。</p>
+          </div>
+          <div class="row-control">
+            <label class="switch">
+              <input type="checkbox" id="subtitles-enabled" data-path="subtitles.enabled">
+              <span class="slider"></span>
+            </label>
+          </div>
+        </div>
+
+        <div class="row column">
+          <div class="row-label"><label>字幕显示方式</label></div>
+          <div class="radio-grid" id="subtitle-modes"></div>
+        </div>
+
+        <div class="row">
+          <div class="row-label"><label for="subtitle-fontSize">字幕字号</label><p>相对视频内嵌字幕的百分比。</p></div>
+          <div class="row-control slider-control">
+            <input type="range" id="subtitle-fontSize" data-path="subtitles.fontSize" min="60" max="200" step="5">
+            <output data-for="subtitles.fontSize">100%</output>
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="row-label"><label for="subtitle-position">距底部位置</label><p>字幕底边离视频底部的距离，按视频高度百分比计算。</p></div>
+          <div class="row-control slider-control">
+            <input type="range" id="subtitle-position" data-path="subtitles.position" min="2" max="45" step="1">
+            <output data-for="subtitles.position">10%</output>
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="row-label"><label for="subtitle-background">背景衬底</label><p>在字幕后面加一层半透明黑底，画面明亮时更易读。</p></div>
+          <div class="row-control">
+            <label class="switch">
+              <input type="checkbox" id="subtitle-background" data-path="subtitles.background">
+              <span class="slider"></span>
+            </label>
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="row-label"><label for="shortcut-subtitles">字幕快捷键</label><p>在视频页面切换双语字幕。</p></div>
+          <div class="row-control">
+            <input class="shortcut" id="shortcut-subtitles" data-path="subtitles.shortcut" readonly placeholder="Alt+S">
+          </div>
+        </div>
+      </div>
+
+      <div class="card note-card">
+        <div class="card-title">支持范围</div>
+        <ul class="bullets">
+          <li><strong>YouTube</strong>：读取视频自带的字幕轨（优先人工字幕，其次自动字幕），在播放器内叠加双语字幕。</li>
+          <li><strong>原生 &lt;track&gt;</strong>：页面上带 WebVTT 字幕轨的 HTML5 播放器。</li>
+          <li>没有字幕轨的视频（例如直播、纯音乐）无法生成字幕，需要站点自身提供文本。</li>
+          <li>字幕同样走翻译缓存，同一段字幕不会重复请求。</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- ============================ 翻译服务 ============================ -->
+    <section class="section" id="services">
+      <div class="section-head">
+        <h2>翻译服务</h2>
+        <p>每个引擎独立保存密钥。点击「使用」即可切换为当前引擎，点击「测试」可用一句英文验证连通性。</p>
+      </div>
+      <div id="services-list"></div>
+    </section>
+
+    <!-- ============================ AI ============================ -->
+    <section class="section" id="ai">
+      <div class="section-head">
+        <h2>AI 翻译</h2>
+        <p>适用于 OpenAI、DeepSeek、Gemini、Claude 等引擎的提示词模板。密钥在「翻译服务」中填写；术语库在独立设置页中管理。</p>
+      </div>
+
+      <div class="card">
+        <div class="row column">
+          <div class="row-label">
+            <label for="ai-prompt">提示词模板</label>
+            <p>可用变量：<code>{{target}}</code> 目标语言、<code>{{source}}</code> 源语言。</p>
+          </div>
+          <textarea id="ai-prompt" data-path="ai.prompt" rows="7" spellcheck="false"></textarea>
+          <div class="inline-actions">
+            <button class="ghost small" id="reset-prompt" type="button">恢复默认提示词</button>
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="row-label"><label for="ai-temperature">温度</label><p>越低越稳定，翻译建议 0–0.3。</p></div>
+          <div class="row-control slider-control">
+            <input type="range" id="ai-temperature" data-path="ai.temperature" min="0" max="1" step="0.1">
+            <output data-for="ai.temperature">0.2</output>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================ 术语库 ============================ -->
+    <section class="section" id="glossary">
+      <div class="section-head">
+        <h2>术语库</h2>
+        <p>固定特定词汇的译法，让同一术语在全文中保持一致。修改后，重新翻译页面即可应用。</p>
+      </div>
+      <div class="card">
+        <div class="row">
+          <div class="row-label"><label for="glossary-enabled">启用术语库</label><p>AI 翻译会参考当前文本命中的术语；模型不一定始终遵守指定译法。</p></div>
+          <div class="row-control"><label class="switch"><input id="glossary-enabled" type="checkbox" data-path="glossary.enabled"><span class="slider"></span></label></div>
+        </div>
+        <div class="row">
+          <div class="row-label"><label for="glossary-machine">机器翻译占位符</label><p>Google、Microsoft 等不使用 AI 术语提示词。开启后使用占位符替换，可能影响译文自然度；占位符损坏时回退为普通翻译。</p></div>
+          <div class="row-control"><label class="switch"><input id="glossary-machine" type="checkbox" data-path="glossary.machineTranslation"><span class="slider"></span></label></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">内置领域库 <span class="glossary-summary" id="glossary-summary" aria-live="polite"></span></div>
+        <div class="row column">
+          <div class="row-label"><label for="glossary-search">选择适合当前内容的词库</label><p>按目标语言匹配；通用条目可用于所有语言。同名词条按勾选先后优先使用，取消后重选可调整顺序。</p></div>
+          <input id="glossary-search" type="search" placeholder="搜索名称、领域或 ID，例如编程、Web3" autocomplete="off">
+          <div id="glossary-libraries"></div>
+          <p id="glossary-empty" hidden>没有匹配的术语库，试试其他关键词。</p>
+          <p id="glossary-source" class="glossary-note"></p>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">自定义术语</div>
+        <div class="row">
+          <div class="row-label"><label for="glossary-language">默认目标语言</label><p>仅对没有单独指定语言的条目生效；CSV 中的 tgt_lng 可为每条术语指定语言。</p></div>
+          <div class="row-control"><select id="glossary-language" data-path="glossary.customTargetLanguage"></select></div>
+        </div>
+        <div class="row column">
+          <div class="row-label"><label for="glossary-custom">你的术语</label><p>每行「原文 = 译文」，或使用 source,target,tgt_lng 格式的 CSV。自定义优先于领域库；空译文表示保留原文。匹配不区分大小写，长词优先。</p></div>
+          <textarea id="glossary-custom" rows="6" spellcheck="false" placeholder="Database = 数据库&#10;prompt = 提示词&#10;OpenAI =" aria-describedby="glossary-error"></textarea>
+          <p id="glossary-error" role="alert"></p>
+          <div class="inline-actions"><button class="ghost small" id="glossary-import" type="button">导入 CSV</button><button class="ghost small" id="glossary-export" type="button">导出 CSV</button><input id="glossary-file" type="file" accept=".csv,text/csv" hidden></div>
+          <p class="glossary-note">导入将替换当前自定义术语。导出会为表格公式风险添加安全前缀，使用本工具重新导入时会自动还原。</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================ 隐私 ============================ -->
+    <section class="section" id="privacy">
+      <div class="section-head">
+        <h2>隐私与安全</h2>
+        <p>翻译请求直接从浏览器发往你选择的引擎，没有中间服务器，也没有任何统计数据上报。</p>
+      </div>
+
+      <div class="card">
+        <div class="row">
+          <div class="row-label">
+            <label for="maskSensitive">发送前屏蔽敏感信息</label>
+            <p>在文本离开浏览器之前，把邮箱、电话号码、常见 API Token 替换为占位符，翻译返回后再还原。建议保持开启。</p>
+          </div>
+          <div class="row-control">
+            <label class="switch">
+              <input type="checkbox" id="maskSensitive" data-path="privacy.maskSensitive">
+              <span class="slider"></span>
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="row">
+          <div class="row-label">
+            <label>翻译缓存</label>
+            <p>翻译过的段落会暂存在浏览器会话内存里，刷新页面、切换标签页或后台从休眠中唤醒都无需重新请求。缓存不写入磁盘，关闭浏览器即清空，条目最多保留 12 小时。缓存只保存译文，不保存原文。</p>
+          </div>
+          <div class="row-control">
+            <span class="pill" id="cache-count">统计中…</span>
+            <button class="ghost" id="clear-cache" type="button">清空缓存</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card note-card">
+        <div class="card-title">这些数据会去哪里？</div>
+        <ul class="bullets">
+          <li>Google / MyMemory：请求发往其公共翻译端点，会被对方记录。</li>
+          <li>DeepL / Microsoft / LibreTranslate：只发送到你在设置里填写的服务。</li>
+          <li>AI 引擎：整段文本会作为提示词发给模型提供方，请勿在敏感页面使用。</li>
+          <li>所有密钥保存在 <code>chrome.storage.local</code>，仅本机可读。</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- ============================ 站点规则 ============================ -->
+    <section class="section" id="sites">
+      <div class="section-head">
+        <h2>站点规则</h2>
+        <p>每行一个域名，支持子域名自动匹配，例如 <code>example.com</code> 会同时匹配 <code>blog.example.com</code>。</p>
+      </div>
+
+      <div class="card">
+        <div class="row column">
+          <div class="row-label"><label for="blacklist">排除站点（永不翻译）</label></div>
+          <textarea id="blacklist" data-path="siteRules.blacklist" data-list="true" rows="5" spellcheck="false" placeholder="mail.google.com&#10;bank.example.com"></textarea>
+        </div>
+        <div class="row column">
+          <div class="row-label"><label for="alwaysTranslate">总是自动翻译</label><p>不受「打开页面自动翻译」开关影响。</p></div>
+          <textarea id="alwaysTranslate" data-path="siteRules.alwaysTranslate" data-list="true" rows="5" spellcheck="false" placeholder="news.ycombinator.com"></textarea>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================ 关于 ============================ -->
+    <section class="section" id="about">
+      <div class="section-head">
+        <h2>关于</h2>
+        <p>一个轻量的开源双语阅读工具，思路参考 Immersive Translate，代码完全独立实现。</p>
+      </div>
+
+      <div class="card">
+        <div class="row">
+          <div class="row-label"><label>版本</label><p>设置结构与旧版兼容，升级不会丢失配置。</p></div>
+          <div class="row-control"><span class="pill" id="about-version">v0.4.0</span></div>
+        </div>
+        <div class="row">
+          <div class="row-label"><label>配置文件</label><p>导出后可在另一台设备导入。</p></div>
+          <div class="row-control inline">
+            <button class="ghost" id="export" type="button">导出 JSON</button>
+            <button class="ghost" id="import" type="button">导入 JSON</button>
+            <input type="file" id="import-file" accept="application/json" hidden>
+          </div>
+        </div>
+      </div>
+
+      <div class="card note-card">
+        <div class="card-title">快捷键</div>
+        <ul class="bullets">
+          <li><kbd id="kbd-toggle">Alt+T</kbd> 翻译 / 还原当前页面</li>
+          <li><kbd id="kbd-selection">Alt+Shift+T</kbd> 翻译当前选中的文本</li>
+          <li><kbd id="kbd-subtitles">Alt+S</kbd> 开关视频双语字幕</li>
+          <li><kbd>Esc</kbd> 关闭译文气泡</li>
+        </ul>
+      </div>
+    </section>
+
+    <footer class="page-foot">Open Translate · AGPLv3 License</footer>
+  </main>
+</div>
+
+<div class="toast" id="toast" hidden></div>
+<script type="module" src="options.js"></script>
+</body>
+</html>

@@ -316,8 +316,9 @@ async function runAi(ask, { texts, source, target, config }) {
 
 async function openAiChat({ texts, source, target, config }) {
   const apiKey = String(config.apiKey || '').trim();
-  if (!apiKey) throw new Error('尚未填写 API Key');
-  const base = trimSlash(config.baseUrl) || 'https://api.openai.com/v1';
+  if (!apiKey && !config.allowAnonymous) throw new Error('尚未填写 API Key');
+  const base = trimSlash(config.baseUrl) || (config.allowAnonymous ? '' : 'https://api.openai.com/v1');
+  if (!base) throw new Error('尚未填写接口地址');
   return runAi(async prompt => {
     const data = await http(`${base}/chat/completions`, {
       method: 'POST',
@@ -339,6 +340,10 @@ async function openAiChat({ texts, source, target, config }) {
 
 const openai = { id: 'openai', translate: openAiChat };
 const deepseek = { id: 'deepseek', translate: openAiChat };
+const custom = {
+  id: 'custom',
+  translate: options => openAiChat({ ...options, config: { ...options.config, allowAnonymous: true } })
+};
 
 const gemini = {
   id: 'gemini',
@@ -398,7 +403,7 @@ const claude = {
 
 // ---------------------------------------------------------------- registry
 
-export const PROVIDERS = { google, mymemory, deepl, microsoft, libre, openai, deepseek, gemini, claude };
+export const PROVIDERS = { google, mymemory, deepl, microsoft, libre, openai, deepseek, gemini, claude, custom };
 
 export function hasProvider(id) {
   return Boolean(PROVIDERS[id]);

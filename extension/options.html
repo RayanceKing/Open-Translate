@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-CN" data-theme="light">
+<html lang="zh-CN" data-theme="auto">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -11,10 +11,6 @@
   <aside class="sidebar">
     <div class="brand">
       <div class="logo">译</div>
-      <div class="brand-text">
-        <strong>Open Translate</strong>
-        <span id="version-label">v0.4.0</span>
-      </div>
     </div>
 
     <nav class="nav" id="nav">
@@ -30,7 +26,9 @@
     </nav>
 
     <div class="sidebar-foot">
-      <button class="ghost" id="theme-toggle" type="button">外观：跟随系统</button>
+      <button class="theme-toggle" id="theme-toggle" type="button" title="外观：跟随系统" aria-label="外观：跟随系统">
+        <span class="theme-icon" aria-hidden="true">🌓</span>
+      </button>
     </div>
   </aside>
 
@@ -41,6 +39,7 @@
         <p class="subtitle">所有配置只保存在本机浏览器中，不会上传到任何服务器。</p>
       </div>
       <div class="head-actions">
+        <span class="pill" id="version-label">v0.4.0</span>
         <span class="save-hint" id="save-hint">已保存</span>
         <button class="ghost" id="reset" type="button">恢复默认</button>
       </div>
@@ -154,13 +153,18 @@
             </select>
           </div>
         </div>
-        <div class="row">
+        <div class="row shortcut-row">
           <div class="row-label">
             <label for="shortcut-toggle">翻译 / 还原快捷键</label>
-            <p>点击输入框后直接按下组合键。</p>
+            <p>点击输入框后直接按下组合键，也可选择移动端三指或四指轻触。</p>
           </div>
-          <div class="row-control">
+          <div class="row-control shortcut-controls">
             <input class="shortcut" id="shortcut-toggle" data-path="shortcuts.toggle" readonly placeholder="Alt+T">
+            <select class="shortcut-choice" data-path="shortcuts.toggle" aria-label="移动端快捷方式">
+              <option value="">键盘组合键</option>
+              <option value="Touch3">三指轻触</option>
+              <option value="Touch4">四指轻触</option>
+            </select>
           </div>
         </div>
         <div class="row">
@@ -550,7 +554,7 @@
       </div>
     </section>
 
-    <footer class="page-foot">Open Translate · MIT License</footer>
+    <footer class="page-foot">Open Translate · AGPLv3 License</footer>
   </main>
 </div>
 

@@ -99,7 +99,8 @@ export const DEFAULT_SETTINGS = {
     openai: { baseUrl: 'https://api.openai.com/v1', apiKey: '', model: 'gpt-4o-mini' },
     deepseek: { baseUrl: 'https://api.deepseek.com/v1', apiKey: '', model: 'deepseek-chat' },
     gemini: { apiKey: '', model: 'gemini-2.0-flash' },
-    claude: { apiKey: '', model: 'claude-3-5-haiku-latest' }
+    claude: { apiKey: '', model: 'claude-3-5-haiku-latest' },
+    custom: { name: '', baseUrl: '', apiKey: '', model: '' }
   },
   ai: {
     prompt: DEFAULT_PROMPT,
@@ -130,7 +131,7 @@ export const DEFAULT_SETTINGS = {
   }
 };
 
-export const AI_ENGINES = ['openai', 'deepseek', 'gemini', 'claude'];
+export const AI_ENGINES = ['openai', 'deepseek', 'gemini', 'claude', 'custom'];
 
 const isPlainObject = value => !!value && typeof value === 'object' && !Array.isArray(value);
 
@@ -156,6 +157,10 @@ export function normalizeSettings(raw) {
 
   const settings = mergeSettings(DEFAULT_SETTINGS, raw || {});
   settings.version = APP_VERSION;
+  if (!['Touch3', 'Touch4'].includes(settings.shortcuts.toggle) && !String(settings.shortcuts.toggle || '').trim()) {
+    settings.shortcuts.toggle = DEFAULT_SETTINGS.shortcuts.toggle;
+  }
+  if (!['auto', 'light', 'dark'].includes(settings.ui.theme)) settings.ui.theme = 'auto';
   settings.glossary = normalizeGlossarySettings(raw?.glossary, raw?.ai?.glossary || '', settings.targetLanguage);
   if (legacyMicrosoftKey) settings.engines.microsoft.useKey = true;
   // The shipped accent used to be purple; anyone who never opened the colour
