@@ -687,6 +687,7 @@
   }
 
   async function ytRenderText(text) {
+    const generation = subtitleGeneration;
     const layer = ensureYtLayer();
     if (!text) { layer.classList.remove('is-visible'); layer.textContent = ''; return; }
     let translation = ytTransCache.get(text);
@@ -696,8 +697,10 @@
       } catch {
         translation = '';
       }
+      if (generation !== subtitleGeneration || text !== ytCurrentText()) return;
       ytTransCache.set(text, translation);
     }
+    if (generation !== subtitleGeneration || text !== ytCurrentText()) return;
     layer.textContent = translation;
     layer.classList.toggle('is-visible', Boolean(translation));
     positionYtLayer(layer);
@@ -970,11 +973,14 @@
     await translateSubtitleChunk(missing);
   }
 
+  let subtitleGeneration = 0;
   async function translateSubtitleChunk(indices) {
+    const generation = subtitleGeneration;
     const { cues } = SUB_STATE;
     const texts = indices.map(index => cues[index].text);
     try {
       const results = await requestTranslation(texts);
+      if (generation !== subtitleGeneration || cues !== SUB_STATE.cues) return;
       results.forEach((value, position) => {
         const index = indices[position];
         if (cues[index]) cues[index].translation = value || '';
@@ -984,6 +990,7 @@
         if (target) target.textContent = cues[SUB_STATE.index]?.translation || '';
       }
     } catch (error) {
+      if (generation !== subtitleGeneration || cues !== SUB_STATE.cues) return;
       // A failed batch must not tear down the overlay: the original line is
       // still readable and the next window shift retries. After a second
       // failure the cue is marked as "translated to nothing" so we stop
@@ -999,7 +1006,7 @@
         toast(`字幕翻译失败：${error.message}`);
       }
     } finally {
-      indices.forEach(index => SUB_STATE.pending.delete(index));
+      if (generation === subtitleGeneration && cues === SUB_STATE.cues) indices.forEach(index => SUB_STATE.pending.delete(index));
     }
   }
 
@@ -1368,7 +1375,19 @@
 
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== 'local' || !changes.settings) return;
-    if (Date.now() - dockWriteAt < 600) return;
+    const relevant = value => JSON.stringify([value?.glossary, value?.ai, value?.engine, value?.engines, value?.sourceLanguage, value?.targetLanguage, value?.privacy]);
+    const translationChanged = relevant(changes.settings.oldValue) !== relevant(changes.settings.newValue);
+    if (!translationChanged && Date.now() - dockWriteAt < 600) return;
+    if (translationChanged) {
+      subtitleGeneration += 1;
+      ytTransCache.clear();
+      ytLastText = '';
+      SUB_STATE.pending.clear();
+      SUB_STATE.cues.forEach(cue => { cue.translation = null; cue.attempts = 0; });
+      SUB_STATE.index = -1;
+      const target = SUB_STATE.layer?.querySelector('.ot-sub-dst');
+      if (target) target.textContent = '';
+    }
     const wasActive = active;
     loadSettings().then(() => {
       applyAppearance();

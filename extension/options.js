@@ -11,6 +11,8 @@ import {
 } from './lib/defaults.js';
 import { ENGINE_CATALOG, ENGINE_BY_ID } from './lib/catalog.js';
 import { loadSettings, saveSettings } from './lib/store.js';
+import { GLOSSARY_SOURCE, GLOSSARY_LIBRARIES } from './lib/glossary-data.js';
+import { parseCustomTerms, serializeGlossaryCsv } from './lib/glossary.js';
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
@@ -56,6 +58,88 @@ function toast(message) {
   setTimeout(() => {
     node.hidden = true;
   }, 2200);
+}
+
+// ---------------------------------------------------------------- glossary
+
+function renderGlossaries() {
+  const list = $('#glossary-libraries');
+  list.replaceChildren();
+  const query = $('#glossary-search').value.trim().toLowerCase();
+  const languageName = code => ['*', 'auto'].includes(code) ? '所有语言' : (LANGUAGES.find(item => item.code === code)?.label || code);
+  $('#glossary-summary').textContent = `已选 ${settings.glossary.libraryIds.length} / ${GLOSSARY_LIBRARIES.length}`;
+  for (const library of GLOSSARY_LIBRARIES) {
+    if (![library.name, library.description, library.id].some(value => String(value || '').toLowerCase().includes(query))) continue;
+    const label = document.createElement('label');
+    label.className = 'glossary-library';
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.dataset.library = library.id;
+    input.checked = settings.glossary.libraryIds.includes(library.id);
+    input.addEventListener('change', () => {
+      settings.glossary.libraryIds = settings.glossary.libraryIds.filter(id => id !== library.id);
+      if (input.checked) settings.glossary.libraryIds.push(library.id);
+      $('#glossary-summary').textContent = `已选 ${settings.glossary.libraryIds.length} / ${GLOSSARY_LIBRARIES.length}`;
+      scheduleSave();
+    });
+    const text = document.createElement('span');
+    const title = document.createElement('strong');
+    title.textContent = library.name;
+    const description = document.createElement('small');
+    description.textContent = library.description;
+    const languages = document.createElement('small');
+    languages.textContent = `${library.langs.map(languageName).join(' / ')} · ${library.entries.length} 条`;
+    text.append(title, description, languages);
+    label.append(input, text);
+    list.append(label);
+  }
+  $('#glossary-empty').hidden = list.childElementCount !== 0;
+}
+
+function bindGlossary() {
+  const language = $('#glossary-language');
+  const universal = document.createElement('option');
+  universal.value = '*'; universal.textContent = '所有目标语言';
+  language.append(universal);
+  for (const item of LANGUAGES) {
+    const option = document.createElement('option');
+    option.value = item.code; option.textContent = item.label; language.append(option);
+  }
+  const source = $('#glossary-source');
+  const link = document.createElement('a');
+  link.href = GLOSSARY_SOURCE.url; link.target = '_blank'; link.rel = 'noopener noreferrer';
+  link.textContent = `Open-Translate-Terms · ${GLOSSARY_SOURCE.revision.slice(0, 8)} · ${GLOSSARY_SOURCE.license}`;
+  source.append(link);
+  $('#glossary-search').addEventListener('input', renderGlossaries);
+  const custom = $('#glossary-custom');
+  function updateCustom() {
+    try {
+      parseCustomTerms(custom.value, settings.glossary.customTargetLanguage);
+      settings.glossary.customTerms = custom.value;
+      $('#glossary-error').textContent = '';
+      scheduleSave();
+    } catch (error) { $('#glossary-error').textContent = error.message; }
+  }
+  custom.addEventListener('input', updateCustom);
+  $('#glossary-import').addEventListener('click', () => $('#glossary-file').click());
+  $('#glossary-file').addEventListener('change', async event => {
+    try {
+      const file = event.target.files?.[0];
+      if (!file) return;
+      const entries = parseCustomTerms(await file.text(), settings.glossary.customTargetLanguage);
+      custom.value = serializeGlossaryCsv(entries);
+      updateCustom();
+    } catch (error) { $('#glossary-error').textContent = error.message; }
+    finally { event.target.value = ''; }
+  });
+  $('#glossary-export').addEventListener('click', () => {
+    try {
+      const entries = parseCustomTerms(custom.value, settings.glossary.customTargetLanguage);
+      const url = URL.createObjectURL(new Blob([serializeGlossaryCsv(entries)], { type: 'text/csv;charset=utf-8' }));
+      const link = document.createElement('a'); link.href = url; link.download = 'open-translate-terms.csv'; link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (error) { $('#glossary-error').textContent = error.message; }
+  });
 }
 
 // ---------------------------------------------------------------- static UI
@@ -417,12 +501,14 @@ function bindTransfer() {
     if (!file) return;
     try {
       const parsed = JSON.parse(await file.text());
-      settings = normalizeSettings(parsed);
+      const imported = normalizeSettings(parsed);
+      parseCustomTerms(imported.glossary.customTerms, imported.glossary.customTargetLanguage);
+      settings = imported;
       await flushSave();
       hydrate();
       toast('配置已导入');
-    } catch {
-      toast('导入失败：不是有效的配置文件');
+    } catch (error) {
+      toast(`导入失败：${error.message || '不是有效的配置文件'}`);
     } finally {
       event.target.value = '';
     }
@@ -495,6 +581,12 @@ function bindNavigation() {
 function hydrate() {
   renderServices();
   syncControls();
+  $('#glossary-custom').value = settings.glossary.customTerms;
+  try {
+    parseCustomTerms(settings.glossary.customTerms, settings.glossary.customTargetLanguage);
+    $('#glossary-error').textContent = '';
+  } catch (error) { $('#glossary-error').textContent = error.message; }
+  renderGlossaries();
   renderPreview();
   applyTheme();
 }
@@ -509,6 +601,7 @@ async function init() {
   renderPresets();
   bindServices();
   bindControls();
+  bindGlossary();
   bindShortcutInputs();
   bindTheme();
   bindTransfer();

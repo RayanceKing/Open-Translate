@@ -3,6 +3,7 @@
 // Results keep the same order and length as `texts`.
 
 import { DEFAULT_PROMPT, LANG_LABEL } from './defaults.js';
+import { formatGlossary } from './glossary.js';
 
 const TIMEOUT = 25000;
 
@@ -264,7 +265,7 @@ function buildPrompt({ texts, source, target, config }) {
     .replaceAll('{{target}}', targetLabel(target))
     .replaceAll('{{source}}', source && source !== 'auto' ? targetLabel(source) : 'the original language (auto-detect)');
   const parts = [head];
-  const glossary = String(config.glossary || '').trim();
+  const glossary = formatGlossary(texts, config.glossaryEntries || []);
   if (glossary) parts.push(`Glossary — always use these translations verbatim:\n${glossary}`);
   if (texts.length === 1) {
     parts.push(`Text:\n<<<\n${texts[0]}\n>>>`);

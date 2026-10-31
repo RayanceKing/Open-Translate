@@ -13,7 +13,7 @@
       <div class="logo">译</div>
       <div class="brand-text">
         <strong>Open Translate</strong>
-        <span id="version-label">v0.3.0</span>
+        <span id="version-label">v0.4.0</span>
       </div>
     </div>
 
@@ -23,6 +23,7 @@
       <a class="nav-item" href="#subtitles" data-target="subtitles">视频字幕</a>
       <a class="nav-item" href="#services" data-target="services">翻译服务</a>
       <a class="nav-item" href="#ai" data-target="ai">AI 翻译</a>
+      <a class="nav-item" href="#glossary" data-target="glossary">术语库</a>
       <a class="nav-item" href="#privacy" data-target="privacy">隐私与安全</a>
       <a class="nav-item" href="#sites" data-target="sites">站点规则</a>
       <a class="nav-item" href="#about" data-target="about">关于</a>
@@ -384,7 +385,7 @@
     <section class="section" id="ai">
       <div class="section-head">
         <h2>AI 翻译</h2>
-        <p>适用于 OpenAI、DeepSeek、Gemini、Claude 等引擎的提示词与术语表。密钥在「翻译服务」中填写。</p>
+        <p>适用于 OpenAI、DeepSeek、Gemini、Claude 等引擎的提示词模板。密钥在「翻译服务」中填写；术语库在独立设置页中管理。</p>
       </div>
 
       <div class="card">
@@ -399,20 +400,54 @@
           </div>
         </div>
 
-        <div class="row column">
-          <div class="row-label">
-            <label for="ai-glossary">术语表</label>
-            <p>每行一条，格式为 <code>原文 = 译文</code>，会强制模型照此翻译。</p>
-          </div>
-          <textarea id="ai-glossary" data-path="ai.glossary" rows="5" spellcheck="false" placeholder="prompt = 提示词&#10;token = 令牌"></textarea>
-        </div>
-
         <div class="row">
           <div class="row-label"><label for="ai-temperature">温度</label><p>越低越稳定，翻译建议 0–0.3。</p></div>
           <div class="row-control slider-control">
             <input type="range" id="ai-temperature" data-path="ai.temperature" min="0" max="1" step="0.1">
             <output data-for="ai.temperature">0.2</output>
           </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================ 术语库 ============================ -->
+    <section class="section" id="glossary">
+      <div class="section-head">
+        <h2>术语库</h2>
+        <p>固定特定词汇的译法，让同一术语在全文中保持一致。修改后，重新翻译页面即可应用。</p>
+      </div>
+      <div class="card">
+        <div class="row">
+          <div class="row-label"><label for="glossary-enabled">启用术语库</label><p>AI 翻译会参考当前文本命中的术语；模型不一定始终遵守指定译法。</p></div>
+          <div class="row-control"><label class="switch"><input id="glossary-enabled" type="checkbox" data-path="glossary.enabled"><span class="slider"></span></label></div>
+        </div>
+        <div class="row">
+          <div class="row-label"><label for="glossary-machine">机器翻译占位符</label><p>Google、Microsoft 等不使用 AI 术语提示词。开启后使用占位符替换，可能影响译文自然度；占位符损坏时回退为普通翻译。</p></div>
+          <div class="row-control"><label class="switch"><input id="glossary-machine" type="checkbox" data-path="glossary.machineTranslation"><span class="slider"></span></label></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">内置领域库 <span class="glossary-summary" id="glossary-summary" aria-live="polite"></span></div>
+        <div class="row column">
+          <div class="row-label"><label for="glossary-search">选择适合当前内容的词库</label><p>按目标语言匹配；通用条目可用于所有语言。同名词条按勾选先后优先使用，取消后重选可调整顺序。</p></div>
+          <input id="glossary-search" type="search" placeholder="搜索名称、领域或 ID，例如编程、Web3" autocomplete="off">
+          <div id="glossary-libraries"></div>
+          <p id="glossary-empty" hidden>没有匹配的术语库，试试其他关键词。</p>
+          <p id="glossary-source" class="glossary-note"></p>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">自定义术语</div>
+        <div class="row">
+          <div class="row-label"><label for="glossary-language">默认目标语言</label><p>仅对没有单独指定语言的条目生效；CSV 中的 tgt_lng 可为每条术语指定语言。</p></div>
+          <div class="row-control"><select id="glossary-language" data-path="glossary.customTargetLanguage"></select></div>
+        </div>
+        <div class="row column">
+          <div class="row-label"><label for="glossary-custom">你的术语</label><p>每行「原文 = 译文」，或使用 source,target,tgt_lng 格式的 CSV。自定义优先于领域库；空译文表示保留原文。匹配不区分大小写，长词优先。</p></div>
+          <textarea id="glossary-custom" rows="6" spellcheck="false" placeholder="Database = 数据库&#10;prompt = 提示词&#10;OpenAI =" aria-describedby="glossary-error"></textarea>
+          <p id="glossary-error" role="alert"></p>
+          <div class="inline-actions"><button class="ghost small" id="glossary-import" type="button">导入 CSV</button><button class="ghost small" id="glossary-export" type="button">导出 CSV</button><input id="glossary-file" type="file" accept=".csv,text/csv" hidden></div>
+          <p class="glossary-note">导入将替换当前自定义术语。导出会为表格公式风险添加安全前缀，使用本工具重新导入时会自动还原。</p>
         </div>
       </div>
     </section>
@@ -492,7 +527,7 @@
       <div class="card">
         <div class="row">
           <div class="row-label"><label>版本</label><p>设置结构与旧版兼容，升级不会丢失配置。</p></div>
-          <div class="row-control"><span class="pill" id="about-version">v0.3.0</span></div>
+          <div class="row-control"><span class="pill" id="about-version">v0.4.0</span></div>
         </div>
         <div class="row">
           <div class="row-label"><label>配置文件</label><p>导出后可在另一台设备导入。</p></div>

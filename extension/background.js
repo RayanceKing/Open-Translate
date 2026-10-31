@@ -3,27 +3,30 @@ import { translateTexts } from './lib/engines.js';
 import { maskAll } from './lib/privacy.js';
 import { AI_ENGINES } from './lib/defaults.js';
 import { cacheKey, readCache, writeCache, clearCache, cacheStats } from './lib/cache.js';
+import { resolveGlossary, glossarySalt, protectGlossary } from './lib/glossary.js';
 
 /** Anything that changes the meaning of a translation without changing the text. */
 function promptSalt(settings, engine) {
   if (!AI_ENGINES.includes(engine)) return '';
-  return `${settings.ai.prompt || ''}\u0000${settings.ai.glossary || ''}\u0000${settings.ai.temperature}`;
+  return `${settings.ai.prompt || ''}\u0000${settings.ai.temperature}`;
 }
 
-async function handleTranslate({ texts = [], engine, source, target }) {
-  const settings = await loadSettings();
+async function handleTranslate({ texts = [], engine, source, target }, snapshot, skipCache = false) {
+  const settings = snapshot || await loadSettings();
   const useEngine = engine || settings.engine;
   const to = target || settings.targetLanguage;
   const from = source || settings.sourceLanguage || 'auto';
   const config = { ...(settings.engines[useEngine] || {}) };
-  if (AI_ENGINES.includes(useEngine)) {
+  const isAI = AI_ENGINES.includes(useEngine);
+  const entries = isAI || settings.glossary?.machineTranslation ? resolveGlossary(settings, to) : [];
+  if (isAI) {
     config.prompt = settings.ai.prompt || '';
-    config.glossary = settings.ai.glossary || '';
+    config.glossaryEntries = entries;
     config.temperature = settings.ai.temperature;
   }
-  const salt = promptSalt(settings, useEngine);
+  const salt = promptSalt(settings, useEngine) + '\u0000' + glossarySalt(settings, to, isAI);
   const keys = texts.map(text => cacheKey({ engine: useEngine, target: to, source: from, salt, text }));
-  const hits = await readCache(keys);
+  const hits = skipCache ? new Map() : await readCache(keys);
 
   const results = new Array(texts.length);
   const pending = [];
@@ -35,15 +38,33 @@ async function handleTranslate({ texts = [], engine, source, target }) {
 
   if (pending.length) {
     const guard = settings.privacy.maskSensitive ? maskAll(pending.map(item => item.text)) : null;
-    const payload = guard ? guard.safe : pending.map(item => item.text);
+    const masked = guard ? guard.safe : pending.map(item => item.text);
+    const protection = !isAI && settings.glossary?.enabled && settings.glossary?.machineTranslation
+      ? protectGlossary(masked, entries) : null;
+    const payload = protection ? protection.safe : masked;
     const translated = await translateTexts({ engine: useEngine, texts: payload, source: from, target: to, config });
+    if (!Array.isArray(translated) || translated.length !== pending.length || translated.some(value => typeof value !== 'string')) {
+      throw new Error('翻译服务返回的段落数量或格式不正确');
+    }
     const fresh = [];
-    translated.forEach((value, index) => {
+    for (let index = 0; index < translated.length; index += 1) {
+      let value = translated[index];
+      let valid = true;
+      if (protection) {
+        const restored = protection.restore(value, index);
+        valid = restored.valid;
+        value = restored.text;
+        if (!valid) {
+          const retry = await translateTexts({ engine: useEngine, texts: [masked[index]], source: from, target: to, config });
+          if (!Array.isArray(retry) || retry.length !== 1 || typeof retry[0] !== 'string') throw new Error('翻译服务返回的段落数量或格式不正确');
+          value = retry[0];
+        }
+      }
       const text = guard ? guard.restore(value) : value;
       results[pending[index].index] = text;
-      if (text) fresh.push([pending[index].key, text]);
-    });
-    writeCache(fresh);
+      if (valid && text) fresh.push([pending[index].key, text]);
+    }
+    if (!skipCache) await writeCache(fresh);
   }
 
   return results;
@@ -51,20 +72,12 @@ async function handleTranslate({ texts = [], engine, source, target }) {
 
 async function handleTest({ engine }) {
   const settings = await loadSettings();
-  const useEngine = engine || settings.engine;
-  const config = { ...(settings.engines[useEngine] || {}) };
-  if (AI_ENGINES.includes(useEngine)) {
-    config.prompt = settings.ai.prompt || '';
-    config.glossary = settings.ai.glossary || '';
-    config.temperature = settings.ai.temperature;
-  }
-  const [sample] = await translateTexts({
-    engine: useEngine,
+  const [sample] = await handleTranslate({
+    engine: engine || settings.engine,
     texts: ['The quick brown fox jumps over the lazy dog.'],
     source: 'auto',
-    target: settings.targetLanguage,
-    config
-  });
+    target: settings.targetLanguage
+  }, settings, true);
   return sample;
 }
 

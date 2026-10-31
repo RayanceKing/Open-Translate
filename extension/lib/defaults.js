@@ -1,6 +1,8 @@
+import { normalizeGlossarySettings } from './glossary.js';
+
 // Shared settings model. Imported by the service worker, options page and popup.
 
-export const APP_VERSION = '0.3.0';
+export const APP_VERSION = '0.4.0';
 
 /** Accent shipped before the switch to Apple system blue. See normalizeSettings. */
 const LEGACY_ACCENT = '#6d5dfc';
@@ -104,6 +106,7 @@ export const DEFAULT_SETTINGS = {
     glossary: '',
     temperature: 0.2
   },
+  glossary: { enabled: true, machineTranslation: false, libraryIds: [], customTerms: '', customTargetLanguage: '*' },
   subtitles: {
     enabled: true,
     mode: 'bilingual',
@@ -153,6 +156,7 @@ export function normalizeSettings(raw) {
 
   const settings = mergeSettings(DEFAULT_SETTINGS, raw || {});
   settings.version = APP_VERSION;
+  settings.glossary = normalizeGlossarySettings(raw?.glossary, raw?.ai?.glossary || '', settings.targetLanguage);
   if (legacyMicrosoftKey) settings.engines.microsoft.useKey = true;
   // The shipped accent used to be purple; anyone who never opened the colour
   // pickers still carries that value, so remap the old default to Apple blue.
