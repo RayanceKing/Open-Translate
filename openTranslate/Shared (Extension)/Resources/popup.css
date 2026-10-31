@@ -1,0 +1,229 @@
+:root {
+  --bg: #ffffff;
+  --text: #1b1b2a;
+  --muted: #6d6e80;
+  --line: #e7e7f0;
+  --accent: #007AFF;
+  --accent-soft: rgba(0, 122, 255, 0.1);
+  --field: #fbfbfe;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #17171f;
+    --text: #ececf3;
+    --muted: #9a9aad;
+    --line: #2a2a37;
+    --accent: #0A84FF;
+    --accent-soft: rgba(10, 132, 255, 0.16);
+    --field: #101018;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  width: 100%;
+  min-width: 100%;
+}
+
+body {
+  width: 100%;
+  min-width: 100%;
+  max-width: none;
+  margin: 0;
+  padding: 14px;
+  background: var(--bg);
+  color: var(--text);
+  font: 13px/1.5 -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 14px;
+}
+
+.logo {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  background: linear-gradient(140deg, #4DA2FF, #007AFF);
+  color: #fff;
+  font-weight: 700;
+  font-size: 14px;
+}
+
+.head-text {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.25;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.head-text strong {
+  font-size: 13px;
+}
+
+.head-text span {
+  font-size: 11.5px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.icon {
+  border: 1px solid var(--line);
+  background: var(--field);
+  color: var(--muted);
+  border-radius: 8px;
+  width: 28px;
+  height: 28px;
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+}
+
+.icon:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.field {
+  margin-bottom: 10px;
+}
+
+.field > label {
+  display: block;
+  margin-bottom: 5px;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+select {
+  width: 100%;
+  appearance: none;
+  padding: 8px 10px;
+  padding-right: 28px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--field);
+  background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+  background-position: calc(100% - 14px) 52%, calc(100% - 9px) 52%;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+  outline: none;
+}
+
+select:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.segmented {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+  padding: 3px;
+  border-radius: 10px;
+  background: var(--field);
+  border: 1px solid var(--line);
+}
+
+.segmented button {
+  border: 0;
+  border-radius: 7px;
+  padding: 6px 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.segmented button:hover {
+  color: var(--text);
+}
+
+.segmented button.is-selected {
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+
+.actions {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.actions.subtitle-row {
+  grid-template-columns: 1fr;
+  margin-top: 8px;
+}
+
+.primary,
+.ghost {
+  border-radius: 9px;
+  padding: 9px 12px;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.primary {
+  border: 1px solid transparent;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+
+.primary:hover {
+  filter: brightness(1.06);
+}
+
+.ghost {
+  border: 1px solid var(--line);
+  background: var(--field);
+  color: var(--text);
+}
+
+.ghost:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.status {
+  margin: 12px 0 0;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--muted);
+  text-align: center;
+}
+
+.status.is-error {
+  color: #d92d20;
+}
+
+kbd {
+  display: inline-block;
+  padding: 0 4px;
+  border: 1px solid var(--line);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  background: var(--field);
+  font: 11px/1.5 ui-monospace, Menlo, monospace;
+}

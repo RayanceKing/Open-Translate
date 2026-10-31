@@ -1,5 +1,6 @@
 import {
   APP_VERSION,
+  AI_ENGINES,
   DEFAULT_PROMPT,
   DEFAULT_SETTINGS,
   DISPLAY_MODES,
@@ -11,6 +12,8 @@ import {
 } from './lib/defaults.js';
 import { ENGINE_CATALOG, ENGINE_BY_ID } from './lib/catalog.js';
 import { loadSettings, saveSettings } from './lib/store.js';
+import { GLOSSARY_SOURCE, GLOSSARY_LIBRARIES } from './lib/glossary-data.js';
+import { parseCustomTerms, serializeGlossaryCsv } from './lib/glossary.js';
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
@@ -22,6 +25,27 @@ const setPath = (object, path, value) => {
   const target = keys.reduce((node, key) => (node[key] ??= {}), object);
   target[last] = value;
 };
+
+// Safari's `chrome` shim does NOT return a promise from runtime.sendMessage and
+// requires a callback, so route every call through this helper. It also reports
+// `chrome.runtime.lastError` instead of swallowing it.
+function sendMessage(message) {
+  return new Promise((resolve, reject) => {
+    try {
+      if (typeof chrome?.runtime?.sendMessage !== 'function') {
+        reject(new Error('chrome.runtime.sendMessage 不可用'));
+        return;
+      }
+      chrome.runtime.sendMessage(message, response => {
+        const lastError = chrome.runtime.lastError;
+        if (lastError) reject(new Error(lastError.message || '消息发送失败'));
+        else resolve(response);
+      });
+    } catch (error) {
+      reject(error);
+    }
+  });
+}
 
 let settings = normalizeSettings(null);
 let saveTimer = null;
@@ -56,6 +80,88 @@ function toast(message) {
   setTimeout(() => {
     node.hidden = true;
   }, 2200);
+}
+
+// ---------------------------------------------------------------- glossary
+
+function renderGlossaries() {
+  const list = $('#glossary-libraries');
+  list.replaceChildren();
+  const query = $('#glossary-search').value.trim().toLowerCase();
+  const languageName = code => ['*', 'auto'].includes(code) ? '所有语言' : (LANGUAGES.find(item => item.code === code)?.label || code);
+  $('#glossary-summary').textContent = `已选 ${settings.glossary.libraryIds.length} / ${GLOSSARY_LIBRARIES.length}`;
+  for (const library of GLOSSARY_LIBRARIES) {
+    if (![library.name, library.description, library.id].some(value => String(value || '').toLowerCase().includes(query))) continue;
+    const label = document.createElement('label');
+    label.className = 'glossary-library';
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.dataset.library = library.id;
+    input.checked = settings.glossary.libraryIds.includes(library.id);
+    input.addEventListener('change', () => {
+      settings.glossary.libraryIds = settings.glossary.libraryIds.filter(id => id !== library.id);
+      if (input.checked) settings.glossary.libraryIds.push(library.id);
+      $('#glossary-summary').textContent = `已选 ${settings.glossary.libraryIds.length} / ${GLOSSARY_LIBRARIES.length}`;
+      scheduleSave();
+    });
+    const text = document.createElement('span');
+    const title = document.createElement('strong');
+    title.textContent = library.name;
+    const description = document.createElement('small');
+    description.textContent = library.description;
+    const languages = document.createElement('small');
+    languages.textContent = `${library.langs.map(languageName).join(' / ')} · ${library.entries.length} 条`;
+    text.append(title, description, languages);
+    label.append(input, text);
+    list.append(label);
+  }
+  $('#glossary-empty').hidden = list.childElementCount !== 0;
+}
+
+function bindGlossary() {
+  const language = $('#glossary-language');
+  const universal = document.createElement('option');
+  universal.value = '*'; universal.textContent = '所有目标语言';
+  language.append(universal);
+  for (const item of LANGUAGES) {
+    const option = document.createElement('option');
+    option.value = item.code; option.textContent = item.label; language.append(option);
+  }
+  const source = $('#glossary-source');
+  const link = document.createElement('a');
+  link.href = GLOSSARY_SOURCE.url; link.target = '_blank'; link.rel = 'noopener noreferrer';
+  link.textContent = `Open-Translate-Terms · ${GLOSSARY_SOURCE.revision.slice(0, 8)} · ${GLOSSARY_SOURCE.license}`;
+  source.append(link);
+  $('#glossary-search').addEventListener('input', renderGlossaries);
+  const custom = $('#glossary-custom');
+  function updateCustom() {
+    try {
+      parseCustomTerms(custom.value, settings.glossary.customTargetLanguage);
+      settings.glossary.customTerms = custom.value;
+      $('#glossary-error').textContent = '';
+      scheduleSave();
+    } catch (error) { $('#glossary-error').textContent = error.message; }
+  }
+  custom.addEventListener('input', updateCustom);
+  $('#glossary-import').addEventListener('click', () => $('#glossary-file').click());
+  $('#glossary-file').addEventListener('change', async event => {
+    try {
+      const file = event.target.files?.[0];
+      if (!file) return;
+      const entries = parseCustomTerms(await file.text(), settings.glossary.customTargetLanguage);
+      custom.value = serializeGlossaryCsv(entries);
+      updateCustom();
+    } catch (error) { $('#glossary-error').textContent = error.message; }
+    finally { event.target.value = ''; }
+  });
+  $('#glossary-export').addEventListener('click', () => {
+    try {
+      const entries = parseCustomTerms(custom.value, settings.glossary.customTargetLanguage);
+      const url = URL.createObjectURL(new Blob([serializeGlossaryCsv(entries)], { type: 'text/csv;charset=utf-8' }));
+      const link = document.createElement('a'); link.href = url; link.download = 'open-translate-terms.csv'; link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (error) { $('#glossary-error').textContent = error.message; }
+  });
 }
 
 // ---------------------------------------------------------------- static UI
@@ -151,7 +257,8 @@ function renderServices() {
   const container = $('#services-list');
   container.innerHTML = ENGINE_CATALOG.map(engine => {
     const config = settings.engines[engine.id] || {};
-    const fields = engine.fields
+    const serviceName = engine.id === 'custom' && config.name?.trim() ? config.name.trim() : engine.name;
+    const fields = (Array.isArray(engine.fields) ? engine.fields : [])
       .map(field => {
         const depends = field.dependsOn ? ` data-depends="${field.dependsOn}"` : '';
         const hidden = field.dependsOn && !config[field.dependsOn] ? ' hidden' : '';
@@ -176,7 +283,7 @@ function renderServices() {
 
     return `<div class="service ${settings.engine === engine.id ? 'is-active' : ''}" data-service="${engine.id}">
       <div class="service-head">
-        <span class="service-name">${engine.name}</span>
+        <span class="service-name">${serviceName}</span>
         <span class="tag ${engine.tag === 'AI' ? 'is-ai' : ''}">${engine.tag}</span>
         <span style="flex:1"></span>
         <button type="button" class="ghost" data-use="${engine.id}">${settings.engine === engine.id ? '使用中' : '使用'}</button>
@@ -238,6 +345,17 @@ function syncServiceDeps(card) {
 
 function syncServiceActive() {
   $$('[data-service]').forEach(card => card.classList.toggle('is-active', card.dataset.service === settings.engine));
+}
+
+function showSelectedService() {
+  if (!AI_ENGINES.includes(settings.engine)) return;
+  const section = $('#services');
+  const card = $(`[data-service="${settings.engine}"]`);
+  section?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  requestAnimationFrame(() => {
+    card?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    card?.querySelector('input')?.focus({ preventScroll: true });
+  });
   $$('[data-use]').forEach(button => {
     const current = button.dataset.use === settings.engine;
     button.textContent = current ? '使用中' : '使用';
@@ -252,7 +370,7 @@ async function testEngine(engine, button) {
   button.disabled = true;
   try {
     await flushSave();
-    const response = await chrome.runtime.sendMessage({ type: 'test-engine', engine });
+    const response = await sendMessage({ type: 'test-engine', engine });
     if (response?.error) throw new Error(response.error);
     status.className = 'service-status is-ok';
     status.textContent = `成功：${response.text}`;
@@ -297,6 +415,8 @@ function syncControls() {
 
   $('#engine').value = settings.engine;
   $('#kbd-toggle').textContent = settings.shortcuts.toggle;
+  const toggleChoice = $('.shortcut-choice');
+  if (toggleChoice) toggleChoice.value = ['Touch3', 'Touch4'].includes(settings.shortcuts.toggle) ? settings.shortcuts.toggle : '';
   $('#kbd-selection').textContent = settings.shortcuts.selection;
   $('#kbd-subtitles').textContent = settings.subtitles.shortcut || '未设置';
   syncDisplayModes();
@@ -331,6 +451,7 @@ function bindControls() {
       if (path === 'engine') {
         updateEngineNote();
         syncServiceActive();
+        showSelectedService();
       }
       if (path.startsWith('shortcuts.')) {
         $('#kbd-toggle').textContent = settings.shortcuts.toggle;
@@ -344,6 +465,13 @@ function bindControls() {
 // ---------------------------------------------------------------- shortcuts
 
 function bindShortcutInputs() {
+  const toggleChoice = $('.shortcut-choice');
+  toggleChoice?.addEventListener('change', () => {
+    if (!toggleChoice.value) return;
+    setPath(settings, toggleChoice.dataset.path, toggleChoice.value);
+    $('#shortcut-toggle').value = toggleChoice.value;
+    scheduleSave();
+  });
   $$('.shortcut').forEach(input => {
     input.addEventListener('focus', () => input.classList.add('is-capturing'));
     input.addEventListener('blur', () => input.classList.remove('is-capturing'));
@@ -365,6 +493,7 @@ function bindShortcutInputs() {
       if (!modifiers.length || ['Alt', 'Control', 'Shift', 'Meta'].includes(event.key)) return;
       const combo = [...modifiers, key.toUpperCase()].join('+');
       input.value = combo;
+      if (input.id === 'shortcut-toggle' && toggleChoice) toggleChoice.value = '';
       setPath(settings, input.dataset.path, combo);
       $('#kbd-toggle').textContent = settings.shortcuts.toggle;
       $('#kbd-selection').textContent = settings.shortcuts.selection;
@@ -383,13 +512,17 @@ function applyTheme() {
   const mode = settings.ui.theme || 'auto';
   const resolved = mode === 'auto' ? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') : mode;
   document.documentElement.dataset.theme = resolved;
-  $('#theme-toggle').textContent = `外观：${THEME_LABEL[mode]}`;
+  const toggle = $('#theme-toggle');
+  toggle.dataset.themeMode = mode;
+  $('.theme-icon', toggle).textContent = mode === 'auto' ? '🌓' : mode === 'dark' ? '🌙' : '🌞';
+  toggle.title = `外观：${THEME_LABEL[mode]}`;
+  toggle.setAttribute('aria-label', toggle.title);
 }
 
 function bindTheme() {
   $('#theme-toggle').addEventListener('click', () => {
-    const index = THEMES.indexOf(settings.ui.theme || 'auto');
-    settings.ui.theme = THEMES[(index + 1) % THEMES.length];
+    const current = THEMES.includes(settings.ui.theme) ? settings.ui.theme : 'auto';
+    settings.ui.theme = THEMES[(THEMES.indexOf(current) + 1) % THEMES.length];
     applyTheme();
     scheduleSave();
   });
@@ -417,12 +550,14 @@ function bindTransfer() {
     if (!file) return;
     try {
       const parsed = JSON.parse(await file.text());
-      settings = normalizeSettings(parsed);
+      const imported = normalizeSettings(parsed);
+      parseCustomTerms(imported.glossary.customTerms, imported.glossary.customTargetLanguage);
+      settings = imported;
       await flushSave();
       hydrate();
       toast('配置已导入');
-    } catch {
-      toast('导入失败：不是有效的配置文件');
+    } catch (error) {
+      toast(`导入失败：${error.message || '不是有效的配置文件'}`);
     } finally {
       event.target.value = '';
     }
@@ -449,7 +584,7 @@ async function refreshCacheStats() {
   const label = $('#cache-count');
   if (!label) return;
   try {
-    const stats = await chrome.runtime.sendMessage({ type: 'cache-stats' });
+    const stats = await sendMessage({ type: 'cache-stats' });
     if (!stats || stats.error) throw new Error(stats?.error || 'unavailable');
     label.textContent = stats.count ? `${stats.count} 条译文` : '暂无缓存';
   } catch {
@@ -463,7 +598,7 @@ function bindCache() {
     const button = $('#clear-cache');
     button.disabled = true;
     try {
-      await chrome.runtime.sendMessage({ type: 'clear-cache' });
+      await sendMessage({ type: 'clear-cache' });
       await refreshCacheStats();
       toast('翻译缓存已清空');
     } catch {
@@ -478,11 +613,30 @@ function bindCache() {
 
 function bindNavigation() {
   const sections = $$('.section');
+  const nav = $('#nav');
+  const items = $$('.nav-item');
+  const centerActiveItem = item => {
+    if (!item || nav.scrollWidth <= nav.clientWidth) return;
+    const target = item.offsetLeft - (nav.clientWidth - item.offsetWidth) / 2;
+    nav.scrollTo({ left: Math.max(0, target), behavior: 'smooth' });
+  };
+  const setActiveItem = id => {
+    const item = items.find(candidate => candidate.dataset.target === id);
+    items.forEach(candidate => candidate.classList.toggle('is-active', candidate === item));
+    centerActiveItem(item);
+  };
+
+  items.forEach(item => {
+    item.addEventListener('click', () => {
+      requestAnimationFrame(() => centerActiveItem(item));
+    });
+  });
+
   const observer = new IntersectionObserver(
     entries => {
       entries.forEach(entry => {
         if (!entry.isIntersecting) return;
-        $$('.nav-item').forEach(item => item.classList.toggle('is-active', item.dataset.target === entry.target.id));
+        setActiveItem(entry.target.id);
       });
     },
     { rootMargin: '-15% 0px -70% 0px', threshold: 0 }
@@ -495,29 +649,46 @@ function bindNavigation() {
 function hydrate() {
   renderServices();
   syncControls();
+  $('#glossary-custom').value = settings.glossary.customTerms;
+  try {
+    parseCustomTerms(settings.glossary.customTerms, settings.glossary.customTargetLanguage);
+    $('#glossary-error').textContent = '';
+  } catch (error) { $('#glossary-error').textContent = error.message; }
+  renderGlossaries();
   renderPreview();
   applyTheme();
 }
 
 async function init() {
-  settings = await loadSettings();
+  try {
+    settings = await loadSettings();
 
-  renderEngineSelect();
-  renderLanguages();
-  renderDisplayModes();
-  renderSubtitleModes();
-  renderPresets();
-  bindServices();
-  bindControls();
-  bindShortcutInputs();
-  bindTheme();
-  bindTransfer();
-  bindCache();
-  bindNavigation();
+    renderEngineSelect();
+    renderLanguages();
+    renderDisplayModes();
+    renderSubtitleModes();
+    renderPresets();
+    bindServices();
+    bindControls();
+    bindGlossary();
+    bindShortcutInputs();
+    bindTheme();
+    bindTransfer();
+    bindCache();
+    bindNavigation();
 
-  $('#version-label').textContent = `v${APP_VERSION}`;
-  $('#about-version').textContent = `v${APP_VERSION}`;
-  hydrate();
+    const versionLabel = $('#version-label');
+    if (versionLabel) versionLabel.textContent = `v${APP_VERSION}`;
+    $('#about-version').textContent = `v${APP_VERSION}`;
+    hydrate();
+  } catch (error) {
+    console.error('Open Translate settings initialization failed', error);
+    const list = $('#services-list');
+    if (list && !list.children.length) {
+      const detail = error?.message ? `（${error.message}）` : '';
+      list.innerHTML = `<div class="card error-card">翻译服务加载失败，请重新打开设置页。${detail}</div>`;
+    }
+  }
 }
 
 init();

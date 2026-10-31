@@ -88,6 +88,18 @@ export const ENGINE_CATALOG = [
       { key: 'apiKey', label: 'API Key', type: 'password', placeholder: 'sk-ant-...' },
       { key: 'model', label: '模型', type: 'text', placeholder: 'claude-3-5-haiku-latest' }
     ]
+  },
+  {
+    id: 'custom',
+    name: '自定义接口',
+    tag: '自定义',
+    note: '兼容 OpenAI Chat Completions 格式的第三方或本地翻译接口。',
+    fields: [
+      { key: 'name', label: '服务名称', type: 'text', placeholder: '我的翻译服务' },
+      { key: 'baseUrl', label: '接口地址', type: 'text', placeholder: 'https://example.com/v1' },
+      { key: 'apiKey', label: 'API Key', type: 'password', placeholder: '可留空' },
+      { key: 'model', label: '模型', type: 'text', placeholder: 'gpt-4o-mini' }
+    ]
   }
 ];
 

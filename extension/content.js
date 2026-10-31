@@ -132,8 +132,9 @@
   function applyAppearance() {
     const root = document.documentElement;
     if (!root) return;
-    root.classList.remove(...PRESETS.map(id => `ot-preset-${id}`), ...MODES.map(id => `ot-mode-${id}`));
+    root.classList.remove(...PRESETS.map(id => `ot-preset-${id}`), ...MODES.map(id => `ot-mode-${id}`), 'ot-loading-apple');
     root.classList.add(`ot-preset-${settings.style.preset}`, `ot-mode-${settings.displayMode}`);
+    if (settings.style.loadingStyle === 'apple') root.classList.add('ot-loading-apple');
 
     const style = settings.style;
     const vars = {
@@ -171,8 +172,29 @@
 
   // ---------------------------------------------------------------- messaging
 
+  // Safari's `chrome` shim does not return a promise from runtime.sendMessage
+  // and requires a callback, so route every call through this helper and surface
+  // chrome.runtime.lastError instead of swallowing it.
+  function sendMessage(message) {
+    return new Promise((resolve, reject) => {
+      try {
+        if (typeof chrome?.runtime?.sendMessage !== 'function') {
+          reject(new Error('chrome.runtime.sendMessage 不可用'));
+          return;
+        }
+        chrome.runtime.sendMessage(message, response => {
+          const lastError = chrome.runtime.lastError;
+          if (lastError) reject(new Error(lastError.message || '消息发送失败'));
+          else resolve(response);
+        });
+      } catch (error) {
+        reject(error);
+      }
+    });
+  }
+
   async function requestTranslation(texts) {
-    const response = await chrome.runtime.sendMessage({ type: 'translate', texts, target: settings.targetLanguage });
+    const response = await sendMessage({ type: 'translate', texts, target: settings.targetLanguage });
     if (!response) throw new Error('后台没有响应，请重新加载页面');
     if (response.error) throw new Error(response.error);
     return response.texts || [];
@@ -186,38 +208,69 @@
     return found.length ? found : [document.body];
   }
 
+  const isBlockCandidate = el => {
+    if (el.closest(SKIP)) return false;
+    if (el.querySelector(`[${MARK}]`)) return false;
+    if (el.nextElementSibling?.hasAttribute(MARK)) return false;
+    if (el.querySelector('p,li,blockquote')) return false;
+    if (!el.getClientRects().length && el.offsetParent === null) return false;
+    return clean(el.innerText || el.textContent).length >= 2;
+  };
+
   function collectBlocks(root) {
-    const candidates = [...root.querySelectorAll(BLOCK_SELECTOR)].filter(el => {
-      if (el.closest(SKIP)) return false;
-      if (el.querySelector(`[${MARK}]`)) return false;
-      if (el.nextElementSibling?.hasAttribute(MARK)) return false;
-      if (el.querySelector('p,li,blockquote')) return false;
-      if (!el.getClientRects().length && el.offsetParent === null) return false;
-      return clean(el.innerText || el.textContent).length >= 2;
+    // The observer hands us a single added node; querySelectorAll would miss it
+    // when that node is itself a block (a lone <p>, <td>, <li>…).
+    const self = root.nodeType === 1 && root.matches(BLOCK_SELECTOR) ? [root] : [];
+    const semantic = [...self, ...root.querySelectorAll(BLOCK_SELECTOR)].filter(isBlockCandidate);
+
+    // Div-soup regions used to be skipped wholesale as soon as the page had any
+    // semantic block, which left entire panels untranslated — SPA "tables" made
+    // of divs, card grids, sidebars built from <div><span>. Collect them per
+    // region instead: an element qualifies only when it neither contains nor
+    // sits inside a semantic block, and only when none of its own children
+    // qualify (innermost wins, so a row and its cells never both translate).
+    const soup = [...root.querySelectorAll('div,span')].filter(el => {
+      if (el.children.length > 2) return false;
+      if (el.closest(SKIP) || el.closest(BLOCK_SELECTOR)) return false;
+      if (el.firstElementChild && el.querySelector(BLOCK_SELECTOR)) return false;
+      // textContent, not innerText: this runs over every leaf div/span on the
+      // page and innerText would force a layout for each one.
+      return clean(el.textContent).length >= 20;
     });
-    if (candidates.length) return candidates;
-    // Fallback for div-soup sites without semantic tags.
-    return [...root.querySelectorAll('div,span')].filter(el => {
-      if (el.closest(SKIP) || el.children.length > 2) return false;
-      const text = clean(el.innerText || '');
-      return text.length >= 20 && !el.querySelector(BLOCK_SELECTOR);
-    });
+    const soupSet = new Set(soup);
+    return semantic.concat(soup.filter(el => !Array.from(el.children).some(child => soupSet.has(child))));
   }
 
   // ---------------------------------------------------------------- rendering
+
+  // Inserting after an element whose parent is a flex/grid container turns the
+  // translation into just another track of that container, so it gets squeezed
+  // into a sliver — or a one-character-wide column. Append inside the block in
+  // that case so it flows underneath instead.
+  const stacksChildren = el => {
+    if (!el) return false;
+    const display = getComputedStyle(el).display;
+    return display.includes('flex') || display.includes('grid');
+  };
 
   function mountTranslation(el) {
     const node = document.createElement('div');
     node.className = 'ot-translation ot-pending';
     node.setAttribute(MARK, 'translation');
-    node.textContent = '翻译中…';
+    const sourceLength = clean(el.textContent).length;
+    if (settings.style.loadingStyle === 'apple') {
+      node.classList.add('ot-loading-skeleton');
+      node.style.setProperty('--ot-skeleton-width', `${Math.min(100, Math.max(12, sourceLength * 0.58))}%`);
+    } else {
+      node.textContent = '翻译中…';
+    }
 
     if (settings.displayMode === 'translation') {
       originalHtml.set(el, el.innerHTML);
       el.innerHTML = '';
       el.append(node);
       el.classList.add('ot-swapped');
-    } else if (INNER_HOSTS.includes(el.tagName)) {
+    } else if (INNER_HOSTS.includes(el.tagName) || stacksChildren(el.parentElement)) {
       el.append(node);
     } else {
       el.insertAdjacentElement('afterend', node);
@@ -238,11 +291,13 @@
   function settle(node, text, error) {
     if (!node?.isConnected) return;
     node.classList.remove('ot-pending');
+    node.classList.remove('ot-loading-skeleton');
     if (error) {
       node.textContent = `翻译失败：${error}`;
       node.classList.add('ot-error');
     } else {
       node.textContent = text;
+      if (settings.style.loadingStyle === 'apple') node.classList.add('ot-result-reveal');
     }
   }
 
@@ -335,15 +390,45 @@
   }
 
   function scan(root = document) {
-    if (!active) return;
+    if (!active) return 0;
     const targets = root === document ? contentRoots().flatMap(collectBlocks) : collectBlocks(root);
     const io = ensureIntersectionObserver();
+    let added = 0;
     for (const el of targets) {
       if (translating.has(el) || pending.has(el)) continue;
       pending.add(el);
       if (io) io.observe(el);
+      added += 1;
     }
     scheduleFlush();
+    return added;
+  }
+
+  // Some SPAs render a panel while it is still display:none and reveal it later
+  // by toggling a class. No node is added, so the MutationObserver never fires
+  // and that content would stay untranslated for good. Re-scan a few times after
+  // enabling, backing off each round; two rounds in a row with nothing new means
+  // the page has settled and sweeping can stop.
+  const SWEEP_DELAYS = [500, 1000, 1500, 3000];
+  let sweepTimer = 0;
+  let sweeps = 0;
+  let idleSweeps = 0;
+
+  function sweep() {
+    sweepTimer = 0;
+    if (!active || sweeps >= SWEEP_DELAYS.length) return;
+    const added = scan(document);
+    sweeps += 1;
+    idleSweeps = added ? 0 : idleSweeps + 1;
+    if (idleSweeps < 2) sweepTimer = setTimeout(sweep, SWEEP_DELAYS[sweeps] ?? 3000);
+  }
+
+  function startSweeping() {
+    clearTimeout(sweepTimer);
+    sweepTimer = 0;
+    sweeps = 0;
+    idleSweeps = 0;
+    sweepTimer = setTimeout(sweep, SWEEP_DELAYS[0]);
   }
 
   // ---------------------------------------------------------------- lifecycle
@@ -352,6 +437,10 @@
     active = false;
     queue.length = 0;
     pending.clear();
+    clearTimeout(sweepTimer);
+    sweepTimer = 0;
+    sweeps = 0;
+    idleSweeps = 0;
     intersectionObserver?.disconnect();
     lastIoAt = 0;
     for (const [el, html] of originalHtml) {
@@ -378,6 +467,7 @@
     // Translate the above-the-fold blocks right away instead of waiting for
     // the observer / next scroll tick.
     flushVisible();
+    startSweeping();
   }
 
   function toggle() {
@@ -419,13 +509,22 @@
     closeBubble();
     bubble = document.createElement('div');
     bubble.className = 'ot-bubble';
-    bubble.textContent = '翻译中…';
+    if (settings.style.loadingStyle === 'apple') {
+      bubble.classList.add('ot-loading-apple', 'ot-loading-skeleton');
+      bubble.style.setProperty('--ot-skeleton-width', `${Math.min(100, Math.max(24, text.length * 0.58))}%`);
+    } else {
+      bubble.textContent = '翻译中…';
+    }
     bubble.style.top = `${Math.min(window.innerHeight - 90, rect.bottom) + window.scrollY + 8}px`;
     bubble.style.left = `${Math.max(8, Math.min(window.innerWidth - 340, rect.left)) + window.scrollX}px`;
     document.body.append(bubble);
     try {
       const [result] = await requestTranslation([text.slice(0, 4000)]);
-      if (bubble) bubble.textContent = result || '没有可显示的译文';
+      if (bubble) {
+        bubble.textContent = result || '没有可显示的译文';
+        bubble.classList.remove('ot-loading-apple', 'ot-loading-skeleton');
+        if (settings.style.loadingStyle === 'apple') bubble.classList.add('ot-result-reveal');
+      }
     } catch (error) {
       if (bubble) {
         bubble.textContent = `翻译失败：${error.message}`;
@@ -687,6 +786,7 @@
   }
 
   async function ytRenderText(text) {
+    const generation = subtitleGeneration;
     const layer = ensureYtLayer();
     if (!text) { layer.classList.remove('is-visible'); layer.textContent = ''; return; }
     let translation = ytTransCache.get(text);
@@ -696,8 +796,10 @@
       } catch {
         translation = '';
       }
+      if (generation !== subtitleGeneration || text !== ytCurrentText()) return;
       ytTransCache.set(text, translation);
     }
+    if (generation !== subtitleGeneration || text !== ytCurrentText()) return;
     layer.textContent = translation;
     layer.classList.toggle('is-visible', Boolean(translation));
     positionYtLayer(layer);
@@ -970,11 +1072,14 @@
     await translateSubtitleChunk(missing);
   }
 
+  let subtitleGeneration = 0;
   async function translateSubtitleChunk(indices) {
+    const generation = subtitleGeneration;
     const { cues } = SUB_STATE;
     const texts = indices.map(index => cues[index].text);
     try {
       const results = await requestTranslation(texts);
+      if (generation !== subtitleGeneration || cues !== SUB_STATE.cues) return;
       results.forEach((value, position) => {
         const index = indices[position];
         if (cues[index]) cues[index].translation = value || '';
@@ -984,6 +1089,7 @@
         if (target) target.textContent = cues[SUB_STATE.index]?.translation || '';
       }
     } catch (error) {
+      if (generation !== subtitleGeneration || cues !== SUB_STATE.cues) return;
       // A failed batch must not tear down the overlay: the original line is
       // still readable and the next window shift retries. After a second
       // failure the cue is marked as "translated to nothing" so we stop
@@ -999,7 +1105,7 @@
         toast(`字幕翻译失败：${error.message}`);
       }
     } finally {
-      indices.forEach(index => SUB_STATE.pending.delete(index));
+      if (generation === subtitleGeneration && cues === SUB_STATE.cues) indices.forEach(index => SUB_STATE.pending.delete(index));
     }
   }
 
@@ -1192,7 +1298,7 @@
   }
 
   function openOptions() {
-    chrome.runtime.sendMessage({ type: 'open-options' }).catch(() => {});
+    sendMessage({ type: 'open-options' }).catch(() => {});
   }
 
   function dockPosition() {
@@ -1352,6 +1458,27 @@
     }
   });
 
+  let touchGesture = null;
+  document.addEventListener('touchstart', event => {
+    const count = event.touches.length;
+    if ((count === 3 || count === 4) && settings.shortcuts.toggle === `Touch${count}`) {
+      touchGesture = { count, x: event.touches[0].clientX, y: event.touches[0].clientY };
+    } else {
+      touchGesture = null;
+    }
+  }, { passive: true });
+  document.addEventListener('touchend', event => {
+    if (!touchGesture || event.touches.length !== 0) return;
+    const gesture = touchGesture;
+    touchGesture = null;
+    if (settings.shortcuts.toggle !== `Touch${gesture.count}`) return;
+    event.preventDefault();
+    toggle();
+  }, { passive: false });
+  document.addEventListener('touchcancel', () => {
+    touchGesture = null;
+  }, { passive: true });
+
   // ---------------------------------------------------------------- bootstrap
 
   chrome.runtime.onMessage.addListener(message => {
@@ -1368,7 +1495,19 @@
 
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== 'local' || !changes.settings) return;
-    if (Date.now() - dockWriteAt < 600) return;
+    const relevant = value => JSON.stringify([value?.glossary, value?.ai, value?.engine, value?.engines, value?.sourceLanguage, value?.targetLanguage, value?.privacy]);
+    const translationChanged = relevant(changes.settings.oldValue) !== relevant(changes.settings.newValue);
+    if (!translationChanged && Date.now() - dockWriteAt < 600) return;
+    if (translationChanged) {
+      subtitleGeneration += 1;
+      ytTransCache.clear();
+      ytLastText = '';
+      SUB_STATE.pending.clear();
+      SUB_STATE.cues.forEach(cue => { cue.translation = null; cue.attempts = 0; });
+      SUB_STATE.index = -1;
+      const target = SUB_STATE.layer?.querySelector('.ot-sub-dst');
+      if (target) target.textContent = '';
+    }
     const wasActive = active;
     loadSettings().then(() => {
       applyAppearance();

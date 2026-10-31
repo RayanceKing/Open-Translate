@@ -24,6 +24,31 @@
 
 Safari 14+ 可用 Xcode 的 **Safari Web Extension Converter** 导入 `extension/` 目录后签名运行。打包时请确认「Website Access」允许目标站点。
 
+### 方式三：Swift 原生应用（iOS / macOS）
+
+仓库内的 [`openTranslate/`](openTranslate/) 是 Swift + Safari Web Extension 原生工程，使用同一套 `extension/` 翻译逻辑，支持：
+
+- iOS 17+ 与 macOS 12+；
+- Safari 网页注入、弹出面板、完整设置页和本地术语库；
+- Apple 原生签名、归档与 App Store / TestFlight 分发；
+- macOS 沙盒与 Hardened Runtime，网络权限已在工程中启用。
+
+使用 Xcode 打开 [`openTranslate/openTranslate.xcodeproj`](openTranslate/openTranslate.xcodeproj)，选择 `openTranslate (iOS)` 或 `openTranslate (macOS)` scheme，设置自己的 Team 和 Bundle Identifier 后运行或 Archive。首次安装后需在 Safari 的「扩展」设置中启用 Open Translate，并授予目标网站访问权限。
+
+`openTranslate/Shared (Extension)/Resources/` 是 Safari 扩展打包副本；修改浏览器扩展后，请同步 `extension/` 中的资源，再重新构建原生工程。原生版本使用 Safari 兼容的 background scripts 配置，不依赖 Chrome 专有的 service worker 启动方式。
+
+## 界面预览
+
+蓝浅色主题下的界面效果：
+
+**设置对话框（dialog）**
+
+![设置对话框 - 蓝浅色主题](dialog-blue-light.png)
+
+**选项设置页（options）**
+
+![选项设置页 - 蓝浅色主题](options-blue-light.png)
+
 ## 功能
 
 ### 翻译引擎
@@ -71,8 +96,26 @@ Microsoft 的免费通道复刻了 Bing 翻译页自身的调用方式：先取�
 ### AI 翻译
 
 - 可自定义提示词模板，支持 `{{target}}`、`{{source}}` 变量
-- 术语表：每行 `原文 = 译文`，强制模型照此翻译
+- 术语库：可选择领域词库或自定义译法，只将当前文本命中的术语加入提示词（见下节）
 - 温度可调，长段落自动按编号批量发送，解析失败会自动降级为逐段请求
+
+### 术语库
+
+扩展完整设置页和用户脚本面板均提供独立的「术语库」入口。内置数据来自 [Open-Translate-Terms](https://github.com/RayanceKing/Open-Translate-Terms)，包含编程、Web3、教育、AO3、推特等 36 个领域库。词库随应用打包，使用时不访问 GitHub；安装后即使无法连接 GitHub，也可以正常匹配术语。
+
+1. 打开「术语库」，启用术语功能，搜索并勾选需要的领域库。默认不勾选领域库，避免无意改变现有译法。
+2. 在自定义术语中每行填写 `原文 = 译文`，例如 `Database = 数据库`。也可导入、导出 `source,target,tgt_lng` 格式的 CSV。
+3. 选择自定义术语的目标语言范围；CSV 可为每条术语指定目标语言。旧版 AI 术语文本会自动保留，无需重新填写。
+4. 修改后重新翻译已显示的网页内容，新请求会使用新词库，不会命中旧术语配置的缓存。
+
+**AI 翻译与机器翻译的区别：**
+
+- **AI 翻译**：通过提示词提供本次文本命中的术语，适用于 OpenAI、DeepSeek、Gemini、Claude。不会将整个领域词库都发送给模型；提示词约束可以提高一致性，但不能保证模型百分之百遵守。
+- **机器翻译**：Google、Microsoft、DeepL、MyMemory、LibreTranslate 不使用 AI 术语提示词。需另行开启「机器翻译占位符」选项（默认关闭），在发送前保护术语、返回后恢复指定译法。这可能影响句子的自然度，更适合术语一致性优先的场景。服务破坏占位符时，该段会回退为普通翻译，不能保证术语译法，也不会把回退结果缓存为术语翻译成功。
+
+**匹配规则：**自定义术语优先于领域库；具体目标语言的条目优先于通用条目。目标语言不匹配的词条不会参与翻译，繁体与简体词库分别处理。空译文在本项目中表示「保留原文」，而不是删除词语。较长术语优先匹配，并检查词边界，避免短词误命中其他单词内部。
+
+自定义术语和领域库选择随完整配置一起导入、导出。词库的数据来源与版本在设置中显示；维护者可以通过下文的同步脚本更新内置快照。
 
 ### 其他
 
@@ -90,7 +133,7 @@ Microsoft 的免费通道复刻了 Bing 翻译页自身的调用方式：先取�
 - **作用范围**：扩展写在 `chrome.storage.session`（内存，不落盘），脚本写在 `sessionStorage`。刷新页面、切换标签页、后台 service worker 被系统回收后重新唤醒，都能直接命中；关闭浏览器或关闭标签页即清空。
 - **有效期**：条目最多保留 12 小时，最多 2000 条，超出按写入顺序淘汰。
 - **只存译文**：key 是 64 位指纹，原文不会进入缓存，即使有人翻看存储也读不到你读过什么。
-- **会自动失效**：换引擎、换语言、改 AI 提示词或术语表都会得到不同的 key，不会误用旧译文。
+- **会自动失效**：换引擎、换语言、改 AI 提示词、自定义术语、领域库选择或机器翻译术语模式都会得到不同的 key，不会误用旧译文。内置词库更新也会改变指纹。
 - **手动清空**：设置页「隐私与安全 → 翻译缓存」显示当前条数并提供「清空缓存」；脚本面板在「通用 → 翻译缓存」里同样可以清空。
 
 ### 站点兼容性

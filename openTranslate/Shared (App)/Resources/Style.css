@@ -1,0 +1,92 @@
+* {
+    -webkit-user-select: none;
+    -webkit-user-drag: none;
+    cursor: default;
+}
+
+:root {
+    color-scheme: light dark;
+
+    --spacing: 20px;
+}
+
+html {
+    height: 100%;
+}
+
+body {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+
+    margin: 0;
+    padding: calc(var(--spacing) * 2);
+    height: 100%;
+
+    font: -apple-system-short-body;
+    text-align: center;
+}
+
+.welcome {
+    display: flex;
+    align-items: center;
+    flex-direction: column;
+    gap: var(--spacing);
+    width: min(100%, 440px);
+}
+
+.app-icon {
+    width: 128px;
+    height: 128px;
+    border-radius: 28px;
+    box-shadow: 0 12px 30px rgb(0 0 0 / 18%);
+}
+
+h1 {
+    margin: 0;
+    font: -apple-system-short-headline;
+}
+
+p {
+    max-width: 34em;
+    margin: 0;
+}
+
+.hint {
+    color: GrayText;
+    font-size: 0.9em;
+}
+
+body:not(.platform-mac, .platform-ios) :is(.platform-mac, .platform-ios) {
+    display: none;
+}
+
+body.platform-ios .platform-mac {
+    display: none;
+}
+
+body.platform-mac .platform-ios {
+    display: none;
+}
+
+body.platform-ios .platform-mac {
+    display: none;
+}
+
+body:not(.state-on, .state-off) :is(.state-on, .state-off) {
+    display: none;
+}
+
+body.state-on :is(.state-off, .state-unknown) {
+    display: none;
+}
+
+body.state-off :is(.state-on, .state-unknown) {
+    display: none;
+}
+
+button {
+    font-size: 1em;
+    padding: 8px 18px;
+}

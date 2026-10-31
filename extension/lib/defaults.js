@@ -1,6 +1,8 @@
+import { normalizeGlossarySettings } from './glossary.js';
+
 // Shared settings model. Imported by the service worker, options page and popup.
 
-export const APP_VERSION = '0.3.0';
+export const APP_VERSION = '0.4.0';
 
 /** Accent shipped before the switch to Apple system blue. See normalizeSettings. */
 const LEGACY_ACCENT = '#6d5dfc';
@@ -74,6 +76,7 @@ export const DEFAULT_SETTINGS = {
   },
   style: {
     preset: 'underline',
+    loadingStyle: 'standard',
     fontSize: 100,
     lineHeight: 1.7,
     fontWeight: 400,
@@ -97,13 +100,15 @@ export const DEFAULT_SETTINGS = {
     openai: { baseUrl: 'https://api.openai.com/v1', apiKey: '', model: 'gpt-4o-mini' },
     deepseek: { baseUrl: 'https://api.deepseek.com/v1', apiKey: '', model: 'deepseek-chat' },
     gemini: { apiKey: '', model: 'gemini-2.0-flash' },
-    claude: { apiKey: '', model: 'claude-3-5-haiku-latest' }
+    claude: { apiKey: '', model: 'claude-3-5-haiku-latest' },
+    custom: { name: '', baseUrl: '', apiKey: '', model: '' }
   },
   ai: {
     prompt: DEFAULT_PROMPT,
     glossary: '',
     temperature: 0.2
   },
+  glossary: { enabled: true, machineTranslation: false, libraryIds: [], customTerms: '', customTargetLanguage: '*' },
   subtitles: {
     enabled: true,
     mode: 'bilingual',
@@ -127,7 +132,7 @@ export const DEFAULT_SETTINGS = {
   }
 };
 
-export const AI_ENGINES = ['openai', 'deepseek', 'gemini', 'claude'];
+export const AI_ENGINES = ['openai', 'deepseek', 'gemini', 'claude', 'custom'];
 
 const isPlainObject = value => !!value && typeof value === 'object' && !Array.isArray(value);
 
@@ -153,6 +158,11 @@ export function normalizeSettings(raw) {
 
   const settings = mergeSettings(DEFAULT_SETTINGS, raw || {});
   settings.version = APP_VERSION;
+  if (!['Touch3', 'Touch4'].includes(settings.shortcuts.toggle) && !String(settings.shortcuts.toggle || '').trim()) {
+    settings.shortcuts.toggle = DEFAULT_SETTINGS.shortcuts.toggle;
+  }
+  if (!['auto', 'light', 'dark'].includes(settings.ui.theme)) settings.ui.theme = 'auto';
+  settings.glossary = normalizeGlossarySettings(raw?.glossary, raw?.ai?.glossary || '', settings.targetLanguage);
   if (legacyMicrosoftKey) settings.engines.microsoft.useKey = true;
   // The shipped accent used to be purple; anyone who never opened the colour
   // pickers still carries that value, so remap the old default to Apple blue.
@@ -163,6 +173,7 @@ export function normalizeSettings(raw) {
   }
   if (!DISPLAY_MODES.some(mode => mode.id === settings.displayMode)) settings.displayMode = 'bilingual';
   if (!STYLE_PRESETS.some(preset => preset.id === settings.style.preset)) settings.style.preset = 'underline';
+  if (!['standard', 'apple'].includes(settings.style.loadingStyle)) settings.style.loadingStyle = 'standard';
   settings.batchSize = clamp(Number(settings.batchSize) || 4, 1, 10);
   settings.concurrency = clamp(Number(settings.concurrency) || 2, 1, 5);
   settings.style.fontSize = clamp(Number(settings.style.fontSize) || 100, 60, 200);

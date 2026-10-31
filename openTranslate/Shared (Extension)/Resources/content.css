@@ -1,0 +1,370 @@
+/* Injected translation surface. All colors come from CSS variables that the
+   content script writes onto <html>, so settings changes apply instantly. */
+
+.ot-translation {
+  display: inline-block;
+  max-width: 100%;
+  font-family: inherit;
+  font-size: calc(1em * var(--ot-fs, 1));
+  font-weight: var(--ot-fw, 400);
+  line-height: var(--ot-lh, 1.7);
+  letter-spacing: normal;
+  text-align: inherit;
+  text-indent: 0;
+  text-transform: none;
+  color: var(--ot-color, inherit);
+  opacity: var(--ot-op, 1);
+  margin: var(--ot-mt, 4px) 0 var(--ot-mb, 12px);
+  padding: var(--ot-py, 2px) var(--ot-px, 8px);
+  border-radius: var(--ot-radius, 6px);
+  background: transparent;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  word-break: break-word;
+  transition: background-color 0.15s ease, filter 0.18s ease;
+}
+
+/* ---------- presets ---------- */
+
+html.ot-preset-underline .ot-translation {
+  padding-bottom: 3px;
+  border-bottom: 1px dashed var(--ot-accent-line, rgba(0, 122, 255, 0.35));
+}
+
+html.ot-preset-divider .ot-translation {
+  padding-left: 10px;
+  border-left: 2px solid var(--ot-accent-line, rgba(0, 122, 255, 0.35));
+}
+
+html.ot-preset-card .ot-translation {
+  padding: 10px 12px;
+  background: var(--ot-bg, rgba(0, 122, 255, 0.1));
+  border: 1px solid var(--ot-accent-line, rgba(0, 122, 255, 0.32));
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+html.ot-preset-quote .ot-translation {
+  padding: 6px 12px;
+  border-left: 4px solid var(--ot-accent, #007AFF);
+  background: var(--ot-bg, rgba(0, 122, 255, 0.1));
+}
+
+html.ot-preset-highlight .ot-translation {
+  padding: 4px 8px;
+  background: var(--ot-bg, rgba(0, 122, 255, 0.1));
+}
+
+html.ot-preset-faded .ot-translation {
+  opacity: calc(var(--ot-op, 1) * 0.68);
+}
+
+html.ot-preset-blur .ot-translation {
+  filter: blur(4px);
+}
+
+html.ot-preset-blur .ot-translation:hover,
+html.ot-preset-blur .ot-translation:focus-within {
+  filter: none;
+}
+
+/* ---------- display modes ---------- */
+
+.ot-hover-hidden {
+  display: none !important;
+}
+
+.ot-hover-visible {
+  display: inline-block !important;
+}
+
+.ot-pending {
+  opacity: calc(var(--ot-op, 1) * 0.55);
+  font-style: italic;
+}
+
+html.ot-loading-apple .ot-pending {
+  position: relative;
+  display: inline-block;
+}
+
+html.ot-loading-apple .ot-loading-skeleton {
+  width: var(--ot-skeleton-width, 42%);
+  min-width: 4em;
+  height: 1.15em;
+  padding: 0;
+  border-radius: 0.5em;
+  background: linear-gradient(110deg, rgba(255, 104, 173, .65), rgba(103, 172, 255, .72), rgba(125, 232, 198, .68), rgba(255, 214, 102, .72), rgba(255, 104, 173, .65));
+  background-size: 260% 100%;
+  animation: ot-loading-shimmer 1.8s linear infinite;
+}
+
+html.ot-loading-apple .ot-loading-skeleton::after {
+  content: '';
+  position: absolute;
+  inset: 12% 0;
+  z-index: -1;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(255, 104, 173, .16), rgba(103, 172, 255, .18), rgba(125, 232, 198, .16), rgba(255, 214, 102, .16));
+  background-size: 220% 100%;
+  filter: blur(7px);
+  animation: ot-loading-shimmer 1.8s linear infinite;
+}
+
+html.ot-loading-apple .ot-result-reveal,
+.ot-bubble.ot-result-reveal {
+  animation: ot-result-reveal .8s ease-out both;
+}
+
+@keyframes ot-loading-shimmer {
+  to { background-position: -260% 0; }
+}
+
+@keyframes ot-result-reveal {
+  0% { opacity: 0; color: #ff68ad; }
+  55% { color: #67acff; }
+  100% { opacity: 1; color: var(--ot-color, inherit); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html.ot-loading-apple .ot-loading-skeleton,
+  html.ot-loading-apple .ot-loading-skeleton::after,
+  html.ot-loading-apple .ot-result-reveal {
+    animation: none;
+  }
+
+  .ot-bubble.ot-loading-skeleton { animation: none; }
+}
+
+.ot-bubble.ot-loading-skeleton {
+  width: var(--ot-skeleton-width, 42%);
+  min-width: 4em;
+  height: 1.15em;
+  padding: 0;
+  border-radius: 0.5em;
+  color: transparent;
+  background: linear-gradient(110deg, rgba(255, 104, 173, .65), rgba(103, 172, 255, .72), rgba(125, 232, 198, .68), rgba(255, 214, 102, .72), rgba(255, 104, 173, .65));
+  background-size: 260% 100%;
+  animation: ot-loading-shimmer 1.8s linear infinite;
+}
+
+.ot-bubble.ot-loading-skeleton::after {
+  content: '';
+  position: absolute;
+  inset: 12% 0;
+  z-index: -1;
+  border-radius: 999px;
+  background: rgba(103, 172, 255, .18);
+  filter: blur(7px);
+}
+
+.ot-error {
+  color: #d92d20 !important;
+  border-color: rgba(217, 45, 32, 0.45) !important;
+  background: rgba(217, 45, 32, 0.08) !important;
+  font-style: normal;
+}
+
+/* ---------- floating dock: settings above, translate below ---------- */
+
+.ot-dock {
+  position: fixed;
+  z-index: 2147483647;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  width: 44px;
+  font: 13px/1.2 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+.ot-dock.is-snapping {
+  transition: left 0.24s cubic-bezier(0.22, 0.61, 0.36, 1), top 0.24s ease;
+}
+
+.ot-gear {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(24, 24, 32, 0.9);
+  color: rgba(255, 255, 255, 0.88);
+  font-size: 18px;
+  line-height: 1;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28);
+  backdrop-filter: blur(6px);
+  opacity: 0.85;
+  cursor: pointer;
+  transition: opacity 0.15s ease, transform 0.15s ease, background 0.15s ease;
+}
+
+.ot-gear:hover {
+  opacity: 1;
+  transform: scale(1.08);
+  background: #2a2a38;
+}
+
+.ot-ball {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: linear-gradient(140deg, #4DA2FF, #007AFF);
+  color: #fff;
+  font: 600 13px/1 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  letter-spacing: 0.02em;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28);
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+  transition: background 0.2s ease, transform 0.15s ease, box-shadow 0.2s ease;
+}
+
+.ot-ball:hover {
+  transform: scale(1.06);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.34);
+}
+
+.ot-dock.is-dragging .ot-ball {
+  cursor: grabbing;
+  transform: scale(1.04);
+}
+
+.ot-dock.is-active .ot-ball {
+  background: linear-gradient(140deg, #4a4763, #2f2d42);
+}
+
+/* ---------- selection bubble ---------- */
+
+.ot-bubble {
+  position: absolute;
+  z-index: 2147483647;
+  max-width: 340px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #1b1b24;
+  color: #f4f4f5;
+  box-shadow: 0 12px 34px rgba(0, 0, 0, 0.34);
+  font: 14px/1.6 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+
+.ot-bubble.ot-error {
+  color: #ffb4ab !important;
+  background: #2a1616 !important;
+}
+
+/* ---------- video subtitles ---------- */
+
+.ot-sub {
+  position: fixed;
+  left: 0;
+  bottom: 0;
+  z-index: 2147483000;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 0 5%;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.14s ease;
+  font-size: 22px;
+  line-height: 1.35;
+  text-align: center;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.85);
+  box-sizing: border-box;
+}
+
+.ot-sub.is-visible {
+  opacity: 1;
+}
+
+.ot-sub.is-offscreen {
+  opacity: 0 !important;
+}
+
+.ot-sub-src,
+.ot-sub-dst {
+  max-width: 100%;
+  padding: 2px 10px;
+  border-radius: 6px;
+  color: #fff;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.ot-sub-src {
+  font-size: 0.78em;
+  opacity: 0.82;
+}
+
+.ot-sub-dst:empty,
+.ot-sub-src:empty {
+  display: none;
+}
+
+.ot-sub.ot-sub-solid .ot-sub-src,
+.ot-sub.ot-sub-solid .ot-sub-dst {
+  background: rgba(0, 0, 0, 0.62);
+}
+
+.ot-sub.ot-sub-dst-only .ot-sub-src {
+  display: none;
+}
+
+/* In overlay/track mode we render the original line ourselves, so the player's
+   own caption window would only duplicate it. In YouTube native-hook mode
+   (ot-sub-ythook) we keep YouTube's caption as the original and only paint the
+   translation above it, so we must NOT hide it. */
+html.ot-sub-on:not(.ot-sub-ythook) .ytp-caption-window-container,
+html.ot-sub-on:not(.ot-sub-ythook) .ytp-caption-window-container * {
+  display: none !important;
+}
+
+/* Translation line painted just above YouTube's native caption (hook mode). */
+.ot-yt-sub {
+  position: fixed;
+  z-index: 2147483000;
+  padding: 2px 10px;
+  border-radius: 6px;
+  color: #fff;
+  text-align: center;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.85);
+  background: rgba(0, 0, 0, 0.55);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.14s ease;
+  box-sizing: border-box;
+  max-width: 92vw;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.ot-yt-sub.is-visible {
+  opacity: 1;
+}
+
+/* ---------- toast ---------- */
+
+.ot-toast {
+  position: fixed;
+  top: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2147483647;
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: rgba(24, 24, 32, 0.92);
+  color: #fff;
+  font: 13px/1.4 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
+}

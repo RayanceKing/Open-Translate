@@ -24,8 +24,15 @@
   box-sizing: border-box;
 }
 
+html {
+  width: 100%;
+  min-width: 100%;
+}
+
 body {
-  width: 296px;
+  width: 100%;
+  min-width: 100%;
+  max-width: none;
   margin: 0;
   padding: 14px;
   background: var(--bg);

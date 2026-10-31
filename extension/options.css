@@ -4,6 +4,22 @@
    保留原有全部 class 与布局语义，仅重做视觉层。
    ========================================================================== */
 
+/* Glossary catalog and validation */
+#glossary-libraries { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr)); gap: 10px; max-height: 340px; overflow-y: auto; width: 100%; padding: 2px; }
+.glossary-library { display: flex; align-items: flex-start; gap: 10px; padding: 12px; border: 1px solid var(--hairline-strong); border-radius: var(--radius-sm); background: var(--field-bg); cursor: pointer; }
+.glossary-library:hover { background: var(--field-bg-hover); }
+.glossary-library:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); }
+.glossary-library input { flex: none; margin: 4px 0 0; accent-color: var(--accent); }
+.glossary-library strong, .glossary-library small { display: block; }
+.glossary-library small { color: var(--muted); font-size: 12px; line-height: 1.6; margin-top: 4px; }
+.glossary-summary, .glossary-note, #glossary-empty { color: var(--muted); font-size: 12px; font-weight: 400; }
+.glossary-summary { margin-left: 8px; }
+.glossary-note { margin: 0; overflow-wrap: anywhere; }
+#glossary-search { width: 100%; }
+#glossary-source a { color: var(--accent-ink); }
+#glossary-error { color: var(--bad); white-space: pre-wrap; }
+#glossary-error:empty { display: none; }
+
 :root {
   color-scheme: light;
 
@@ -93,14 +109,19 @@ html,
 body {
   margin: 0;
   padding: 0;
+  width: 100%;
+  min-width: 0;
+  min-height: 100%;
 }
 
 html {
   background: var(--bg-base);
+  min-height: 100%;
 }
 
 body {
   min-height: 100vh;
+  min-height: 100dvh;
   color: var(--text);
   font: 14px/1.6 -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
   letter-spacing: -0.006em;
@@ -151,6 +172,8 @@ body {
   display: grid;
   grid-template-columns: 248px minmax(0, 1fr);
   min-height: 100vh;
+  min-height: 100dvh;
+  width: 100%;
 }
 
 /* ------------------------------------------------------------ sidebar */
@@ -175,7 +198,6 @@ body {
 .brand {
   display: flex;
   align-items: center;
-  gap: 11px;
   padding: 0 8px;
 }
 
@@ -275,8 +297,42 @@ body {
   padding: 0 4px;
 }
 
-.sidebar-foot .ghost {
-  width: 100%;
+.theme-toggle {
+  position: relative;
+  display: block;
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  border: 1px solid var(--hairline-strong);
+  border-radius: 50%;
+  background: var(--field-bg);
+  color: var(--text);
+  box-shadow: var(--inner-hi);
+  cursor: pointer;
+  line-height: 1;
+}
+
+.theme-toggle[data-theme-mode='auto'] {
+  width: 38px;
+}
+
+.theme-auto-label {
+  display: none;
+}
+
+.theme-icon {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  display: block;
+  font-size: 30px;
+  line-height: 1;
+  transform: translate(-50%, -50%);
+}
+
+.theme-toggle:hover {
+  border-color: var(--accent);
+  color: var(--accent-ink);
 }
 
 /* ------------------------------------------------------------ main */
@@ -284,6 +340,8 @@ body {
 .main {
   padding: 38px 46px 96px;
   max-width: 960px;
+  width: 100%;
+  min-width: 0;
 }
 
 .page-head {
@@ -366,7 +424,7 @@ body {
   border: 1px solid var(--glass-border);
   border-radius: var(--radius-xl);
   box-shadow: var(--inner-hi), var(--inner-ring), var(--shadow-glass);
-  overflow: hidden;
+  overflow: visible;
 }
 
 .card-title {
@@ -529,8 +587,29 @@ input[type='color']::-webkit-color-swatch {
   text-align: center;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   cursor: pointer;
-  min-width: 160px;
+  min-width: 0;
+  width: 160px;
   letter-spacing: 0;
+}
+
+.shortcut-controls {
+  min-width: 0;
+  max-width: 100%;
+  flex-wrap: wrap;
+}
+
+.shortcut-controls .shortcut,
+.shortcut-controls .shortcut-choice {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.shortcut-controls .shortcut {
+  flex: 1 1 160px;
+}
+
+.shortcut-controls .shortcut-choice {
+  flex: 1 1 150px;
 }
 
 .shortcut.is-capturing {
@@ -566,7 +645,9 @@ kbd {
   display: inline-block;
   width: 46px;
   height: 28px;
-  flex: 0 0 auto;
+  flex: 0 0 46px;
+  max-width: 46px;
+  min-width: 46px;
 }
 
 .switch input {
@@ -920,6 +1001,18 @@ output {
   align-items: center;
   gap: 10px;
   padding: 16px 22px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.service-head > span[style*='flex:1'] {
+  flex: 1 1 20px !important;
+  min-width: 20px;
+}
+
+.service-head > button {
+  flex: 0 0 auto;
+  min-width: 72px;
 }
 
 .service-name {
@@ -982,10 +1075,12 @@ output {
 .service-field input[type='password'] {
   flex: 1 1 auto;
   max-width: 340px;
+  min-width: 0;
 }
 
 .service-field .switch {
   margin-left: 0;
+  flex: 0 0 46px;
 }
 
 .service-foot {
@@ -1184,7 +1279,7 @@ button {
     flex-direction: row;
     align-items: center;
     gap: 12px;
-    overflow-x: auto;
+    overflow: hidden;
     border-right: 0;
     border-bottom: 1px solid var(--glass-border);
     padding: 12px 16px;
@@ -1199,9 +1294,18 @@ button {
   .nav {
     flex-direction: row;
     gap: 4px;
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .nav::-webkit-scrollbar {
+    display: none;
   }
 
   .nav-item {
+    flex: 0 0 auto;
     white-space: nowrap;
   }
 
@@ -1225,7 +1329,73 @@ button {
     min-width: 0;
   }
 
+  .shortcut-controls {
+    width: 100%;
+  }
+
   .radio-grid {
     grid-template-columns: 1fr;
+  }
+
+  .page-head {
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .head-actions {
+    width: 100%;
+    justify-content: flex-end;
+  }
+
+  .service-field {
+    flex-wrap: wrap;
+  }
+
+  .service-field > label {
+    flex: 1 1 100%;
+  }
+
+  .service-field input[type='text'],
+  .service-field input[type='password'] {
+    width: 100%;
+    max-width: none;
+  }
+
+  .service-head {
+    align-items: flex-start;
+    padding: 14px 16px;
+  }
+
+  .service-name {
+    min-width: 0;
+    max-width: calc(100% - 92px);
+    overflow-wrap: anywhere;
+  }
+
+  .service-head > span[style*='flex:1'] {
+    display: none;
+  }
+
+  .service-head > button {
+    margin-left: auto;
+  }
+
+  .service-note,
+  .service-body {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+
+  .service-field {
+    flex-wrap: wrap;
+  }
+
+  .service-field > label:not(.switch) {
+    flex: 1 1 100%;
+  }
+
+  .service-field .switch {
+    width: 46px;
+    min-width: 46px;
   }
 }

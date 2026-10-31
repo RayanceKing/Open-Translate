@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>Open Translate</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header class="head">
+    <div class="logo">译</div>
+    <div class="head-text">
+      <strong>Open Translate</strong>
+      <span id="page-host">当前页面</span>
+    </div>
+    <button class="icon" id="open-options" title="打开设置" aria-label="打开设置">⚙</button>
+  </header>
+
+  <div class="field">
+    <label for="engine">翻译引擎</label>
+    <select id="engine"></select>
+  </div>
+
+  <div class="field">
+    <label for="language">目标语言</label>
+    <select id="language"></select>
+  </div>
+
+  <div class="field">
+    <label>显示模式</label>
+    <div class="segmented" id="modes">
+      <button type="button" data-mode="bilingual">双语</button>
+      <button type="button" data-mode="translation">仅译文</button>
+      <button type="button" data-mode="hover">悬停</button>
+    </div>
+  </div>
+
+  <div class="actions">
+    <button class="primary" id="translate">翻译此页</button>
+    <button class="ghost" id="restore">还原原文</button>
+  </div>
+
+  <div class="actions subtitle-row">
+    <button class="ghost" id="subtitles">开关视频双语字幕</button>
+  </div>
+
+  <p class="status" id="status">快捷键 <kbd>Alt</kbd> + <kbd>T</kbd> 可随时切换</p>
+
+  <script type="module" src="popup.js"></script>
+</body>
+</html>
