@@ -1658,22 +1658,48 @@ function protectGlossary(texts, entries) {
     return found.length ? found : [document.body];
   }
 
+  const isBlockCandidate = el => {
+    if (el.closest(SKIP)) return false;
+    if (el.querySelector(`[${MARK}]`)) return false;
+    if (el.nextElementSibling?.hasAttribute(MARK)) return false;
+    if (el.querySelector('p,li,blockquote')) return false;
+    if (!el.getClientRects().length && el.offsetParent === null) return false;
+    return clean(el.innerText || el.textContent).length >= 2;
+  };
+
   function collectBlocks(root) {
-    const candidates = [...root.querySelectorAll(BLOCK_SELECTOR)].filter(el => {
-      if (el.closest(SKIP)) return false;
-      if (el.querySelector(`[${MARK}]`)) return false;
-      if (el.nextElementSibling?.hasAttribute(MARK)) return false;
-      if (el.querySelector('p,li,blockquote')) return false;
-      if (!el.getClientRects().length && el.offsetParent === null) return false;
-      return clean(el.innerText || el.textContent).length >= 2;
+    // The observer hands us a single added node; querySelectorAll would miss it
+    // when that node is itself a block (a lone <p>, <td>, <li>…).
+    const self = root.nodeType === 1 && root.matches(BLOCK_SELECTOR) ? [root] : [];
+    const semantic = [...self, ...root.querySelectorAll(BLOCK_SELECTOR)].filter(isBlockCandidate);
+
+    // Div-soup regions used to be skipped wholesale as soon as the page had any
+    // semantic block, which left entire panels untranslated — SPA "tables" made
+    // of divs, card grids, sidebars built from <div><span>. Collect them per
+    // region instead: an element qualifies only when it neither contains nor
+    // sits inside a semantic block, and only when none of its own children
+    // qualify (innermost wins, so a row and its cells never both translate).
+    const soup = [...root.querySelectorAll('div,span')].filter(el => {
+      if (el.children.length > 2) return false;
+      if (el.closest(SKIP) || el.closest(BLOCK_SELECTOR)) return false;
+      if (el.firstElementChild && el.querySelector(BLOCK_SELECTOR)) return false;
+      // textContent, not innerText: this runs over every leaf div/span on the
+      // page and innerText would force a layout for each one.
+      return clean(el.textContent).length >= 20;
     });
-    if (candidates.length) return candidates;
-    return [...root.querySelectorAll('div,span')].filter(el => {
-      if (el.closest(SKIP) || el.children.length > 2) return false;
-      const text = clean(el.innerText || '');
-      return text.length >= 20 && !el.querySelector(BLOCK_SELECTOR);
-    });
+    const soupSet = new Set(soup);
+    return semantic.concat(soup.filter(el => !Array.from(el.children).some(child => soupSet.has(child))));
   }
+
+  // Inserting after an element whose parent is a flex/grid container turns the
+  // translation into just another track of that container, so it gets squeezed
+  // into a sliver — or a one-character-wide column. Append inside the block in
+  // that case so it flows underneath instead.
+  const stacksChildren = el => {
+    if (!el) return false;
+    const display = getComputedStyle(el).display;
+    return display.includes('flex') || display.includes('grid');
+  };
 
   function mountTranslation(el) {
     const node = document.createElement('div');
@@ -1685,7 +1711,7 @@ function protectGlossary(texts, entries) {
       originalHtml.set(el, el.innerHTML);
       el.innerHTML = '';
       el.append(node);
-    } else if (INNER_HOSTS.includes(el.tagName)) {
+    } else if (INNER_HOSTS.includes(el.tagName) || stacksChildren(el.parentElement)) {
       el.append(node);
     } else {
       el.insertAdjacentElement('afterend', node);
@@ -1803,21 +1829,55 @@ function protectGlossary(texts, entries) {
   }
 
   function scan(root = document) {
-    if (!active) return;
+    if (!active) return 0;
     const targets = root === document ? contentRoots().flatMap(collectBlocks) : collectBlocks(root);
     const io = ensureIntersectionObserver();
+    let added = 0;
     for (const el of targets) {
       if (translating.has(el) || pending.has(el)) continue;
       pending.add(el);
       if (io) io.observe(el);
+      added += 1;
     }
     scheduleFlush();
+    return added;
+  }
+
+  // Some SPAs render a panel while it is still display:none and reveal it later
+  // by toggling a class. No node is added, so the MutationObserver never fires
+  // and that content would stay untranslated for good. Re-scan a few times after
+  // enabling, backing off each round; two rounds in a row with nothing new means
+  // the page has settled and sweeping can stop.
+  const SWEEP_DELAYS = [500, 1000, 1500, 3000];
+  let sweepTimer = 0;
+  let sweeps = 0;
+  let idleSweeps = 0;
+
+  function sweep() {
+    sweepTimer = 0;
+    if (!active || sweeps >= SWEEP_DELAYS.length) return;
+    const added = scan(document);
+    sweeps += 1;
+    idleSweeps = added ? 0 : idleSweeps + 1;
+    if (idleSweeps < 2) sweepTimer = setTimeout(sweep, SWEEP_DELAYS[sweeps] ?? 3000);
+  }
+
+  function startSweeping() {
+    clearTimeout(sweepTimer);
+    sweepTimer = 0;
+    sweeps = 0;
+    idleSweeps = 0;
+    sweepTimer = setTimeout(sweep, SWEEP_DELAYS[0]);
   }
 
   function restore() {
     active = false;
     queue.length = 0;
     pending.clear();
+    clearTimeout(sweepTimer);
+    sweepTimer = 0;
+    sweeps = 0;
+    idleSweeps = 0;
     intersectionObserver?.disconnect();
     lastIoAt = 0;
     for (const [el, html] of originalHtml) {
@@ -1841,6 +1901,7 @@ function protectGlossary(texts, entries) {
     // Translate the above-the-fold blocks right away instead of waiting for
     // the observer / next scroll tick.
     flushVisible();
+    startSweeping();
   }
 
   const toggle = () => (active ? restore() : start());
