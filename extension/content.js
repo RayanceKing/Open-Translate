@@ -5,6 +5,11 @@
   const SKIP = 'script,style,noscript,textarea,input,select,option,button,code,pre,kbd,samp,svg,canvas,[contenteditable="true"],[data-open-translate]';
   const BLOCK_SELECTOR = 'p,li,h1,h2,h3,h4,h5,h6,blockquote,figcaption,td,th,dd,dt';
   const INNER_HOSTS = ['LI', 'TD', 'TH', 'DD', 'DT', 'BLOCKQUOTE'];
+  // Prefetch band around the viewport: start translating a paragraph slightly
+  // before it scrolls into view so it is usually ready by the time the reader
+  // reaches it, without translating the whole document up front.
+  const LAZY_ROOT_MARGIN = '400px 0px';
+  const LAZY_MARGIN_PX = 400;
   const ENGINE_SHORT = {
     google: 'Google',
     mymemory: 'MyMemory',
@@ -65,9 +70,13 @@
   let settings = structuredClone(DEFAULTS);
   let active = false;
   let observer = null;
+  let intersectionObserver = null;
+  let lastIoAt = 0;
   let dock = null;
   let dockWriteAt = 0;
   let translating = new WeakSet();
+  const pending = new Set();
+  let flushScheduled = false;
   const queue = [];
   const originalHtml = new Map();
   let inflight = 0;
@@ -261,10 +270,80 @@
     pump();
   }
 
+  // Lazy, viewport-driven translation. Instead of translating the whole page
+  // the moment it is enabled, we collect every block into `pending` and only
+  // translate the ones the reader is about to see. This mirrors Immersive
+  // Translate's "translate as you scroll" model and avoids firing hundreds of
+  // requests at once, which trips engine rate limits and risk control.
+  //
+  // An IntersectionObserver is the primary trigger. It is not guaranteed to
+  // fire in every environment (some webviews throttle it, and it is inert under
+  // headless virtual time), so a throttled scroll/resize bounding-rect check
+  // acts as a fallback. Both paths funnel through `pending`, so a block is
+  // never translated twice.
+  function ensureIntersectionObserver() {
+    if (intersectionObserver || typeof IntersectionObserver === 'undefined') return intersectionObserver;
+    intersectionObserver = new IntersectionObserver(entries => {
+      if (!active) return;
+      lastIoAt = Date.now();
+      for (const entry of entries) {
+        if (!entry.isIntersecting) continue;
+        const el = entry.target;
+        intersectionObserver.unobserve(el);
+        if (pending.delete(el)) enqueue(el);
+      }
+    }, { rootMargin: LAZY_ROOT_MARGIN, threshold: 0 });
+    return intersectionObserver;
+  }
+
+  const inViewport = (el, margin) => {
+    const rect = el.getBoundingClientRect();
+    if (!rect.width && !rect.height) return false;
+    return rect.bottom >= -margin && rect.top <= window.innerHeight + margin;
+  };
+
+  function flushVisible() {
+    if (!active || !pending.size) return;
+    for (const el of [...pending]) {
+      if (!el.isConnected) {
+        pending.delete(el);
+        continue;
+      }
+      if (!inViewport(el, LAZY_MARGIN_PX)) continue;
+      pending.delete(el);
+      intersectionObserver?.unobserve(el);
+      enqueue(el);
+    }
+  }
+
+  function scheduleFlush() {
+    if (Date.now() - lastIoAt < 500) return; // observer delivered recently
+    if (flushScheduled) return;
+    flushScheduled = true;
+    // requestAnimationFrame is inert in some embedded webviews (and under
+    // headless virtual time), which is exactly the situation this fallback
+    // exists for, so drive it from a plain timer rather than the compositor.
+    setTimeout(() => {
+      flushScheduled = false;
+      flushVisible();
+    }, 16);
+  }
+
+  function watchViewport() {
+    addEventListener('scroll', scheduleFlush, { passive: true, capture: true });
+    addEventListener('resize', scheduleFlush, { passive: true });
+  }
+
   function scan(root = document) {
     if (!active) return;
     const targets = root === document ? contentRoots().flatMap(collectBlocks) : collectBlocks(root);
-    targets.forEach(enqueue);
+    const io = ensureIntersectionObserver();
+    for (const el of targets) {
+      if (translating.has(el) || pending.has(el)) continue;
+      pending.add(el);
+      if (io) io.observe(el);
+    }
+    scheduleFlush();
   }
 
   // ---------------------------------------------------------------- lifecycle
@@ -272,6 +351,9 @@
   function restore() {
     active = false;
     queue.length = 0;
+    pending.clear();
+    intersectionObserver?.disconnect();
+    lastIoAt = 0;
     for (const [el, html] of originalHtml) {
       if (el.isConnected) {
         el.innerHTML = trustedHtml(html);
@@ -293,6 +375,9 @@
     active = true;
     renderDock();
     scan(document);
+    // Translate the above-the-fold blocks right away instead of waiting for
+    // the observer / next scroll tick.
+    flushVisible();
   }
 
   function toggle() {
@@ -307,7 +392,6 @@
       for (const record of records) {
         for (const node of record.addedNodes) {
           if (node.nodeType !== 1 || node.hasAttribute?.(MARK)) continue;
-          if (queue.length > 80) return;
           scan(node);
         }
       }
@@ -1303,6 +1387,7 @@
   loadSettings().then(() => {
     applyAppearance();
     observe();
+    watchViewport();
     if (document.body) renderDock();
     if (settings.autoTranslate || settings.siteRules.alwaysTranslate.some(matchesSite)) sleep(400).then(start);
   });
