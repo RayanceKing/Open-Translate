@@ -76,6 +76,7 @@ export const DEFAULT_SETTINGS = {
   },
   style: {
     preset: 'underline',
+    loadingStyle: 'standard',
     fontSize: 100,
     lineHeight: 1.7,
     fontWeight: 400,
@@ -172,6 +173,7 @@ export function normalizeSettings(raw) {
   }
   if (!DISPLAY_MODES.some(mode => mode.id === settings.displayMode)) settings.displayMode = 'bilingual';
   if (!STYLE_PRESETS.some(preset => preset.id === settings.style.preset)) settings.style.preset = 'underline';
+  if (!['standard', 'apple'].includes(settings.style.loadingStyle)) settings.style.loadingStyle = 'standard';
   settings.batchSize = clamp(Number(settings.batchSize) || 4, 1, 10);
   settings.concurrency = clamp(Number(settings.concurrency) || 2, 1, 5);
   settings.style.fontSize = clamp(Number(settings.style.fontSize) || 100, 60, 200);

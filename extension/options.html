@@ -195,6 +195,16 @@
         <div class="card-title">细节调整</div>
 
         <div class="row">
+          <div class="row-label"><label for="style-loadingStyle">翻译中占位样式</label><p>选择请求翻译时的加载提示外观。</p></div>
+          <div class="row-control">
+            <select id="style-loadingStyle" data-path="style.loadingStyle">
+              <option value="standard">标准</option>
+              <option value="apple">Apple Intelligence 彩色骨架</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="row">
           <div class="row-label"><label for="style-fontSize">字号</label><p>相对原文的百分比。</p></div>
           <div class="row-control slider-control">
             <input type="range" id="style-fontSize" data-path="style.fontSize" min="60" max="160" step="5">

@@ -82,6 +82,81 @@ html.ot-preset-blur .ot-translation:focus-within {
   font-style: italic;
 }
 
+html.ot-loading-apple .ot-pending {
+  position: relative;
+  display: inline-block;
+}
+
+html.ot-loading-apple .ot-loading-skeleton {
+  width: var(--ot-skeleton-width, 42%);
+  min-width: 4em;
+  height: 1.15em;
+  padding: 0;
+  border-radius: 0.5em;
+  background: linear-gradient(110deg, rgba(255, 104, 173, .65), rgba(103, 172, 255, .72), rgba(125, 232, 198, .68), rgba(255, 214, 102, .72), rgba(255, 104, 173, .65));
+  background-size: 260% 100%;
+  animation: ot-loading-shimmer 1.8s linear infinite;
+}
+
+html.ot-loading-apple .ot-loading-skeleton::after {
+  content: '';
+  position: absolute;
+  inset: 12% 0;
+  z-index: -1;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(255, 104, 173, .16), rgba(103, 172, 255, .18), rgba(125, 232, 198, .16), rgba(255, 214, 102, .16));
+  background-size: 220% 100%;
+  filter: blur(7px);
+  animation: ot-loading-shimmer 1.8s linear infinite;
+}
+
+html.ot-loading-apple .ot-result-reveal,
+.ot-bubble.ot-result-reveal {
+  animation: ot-result-reveal .8s ease-out both;
+}
+
+@keyframes ot-loading-shimmer {
+  to { background-position: -260% 0; }
+}
+
+@keyframes ot-result-reveal {
+  0% { opacity: 0; color: #ff68ad; }
+  55% { color: #67acff; }
+  100% { opacity: 1; color: var(--ot-color, inherit); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html.ot-loading-apple .ot-loading-skeleton,
+  html.ot-loading-apple .ot-loading-skeleton::after,
+  html.ot-loading-apple .ot-result-reveal {
+    animation: none;
+  }
+
+  .ot-bubble.ot-loading-skeleton { animation: none; }
+}
+
+.ot-bubble.ot-loading-skeleton {
+  width: var(--ot-skeleton-width, 42%);
+  min-width: 4em;
+  height: 1.15em;
+  padding: 0;
+  border-radius: 0.5em;
+  color: transparent;
+  background: linear-gradient(110deg, rgba(255, 104, 173, .65), rgba(103, 172, 255, .72), rgba(125, 232, 198, .68), rgba(255, 214, 102, .72), rgba(255, 104, 173, .65));
+  background-size: 260% 100%;
+  animation: ot-loading-shimmer 1.8s linear infinite;
+}
+
+.ot-bubble.ot-loading-skeleton::after {
+  content: '';
+  position: absolute;
+  inset: 12% 0;
+  z-index: -1;
+  border-radius: 999px;
+  background: rgba(103, 172, 255, .18);
+  filter: blur(7px);
+}
+
 .ot-error {
   color: #d92d20 !important;
   border-color: rgba(217, 45, 32, 0.45) !important;

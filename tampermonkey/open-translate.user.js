@@ -335,7 +335,7 @@ function protectGlossary(texts, entries) {
     concurrency: 2,
     privacy: { maskSensitive: true },
     style: {
-      preset: 'underline', fontSize: 100, lineHeight: 1.7, fontWeight: 400, opacity: 100,
+      preset: 'underline', loadingStyle: 'standard', fontSize: 100, lineHeight: 1.7, fontWeight: 400, opacity: 100,
       colorMode: 'inherit', color: '#3f3f46', accent: '#007AFF', background: '#007AFF',
       radius: 6, paddingX: 8, paddingY: 2, marginTop: 4, marginBottom: 12
     },
@@ -411,6 +411,7 @@ function protectGlossary(texts, entries) {
     if (legacy && legacy.useKey === undefined && String(legacy.key || '').trim()) {
       next.engines.microsoft.useKey = true;
     }
+    if (!['standard', 'apple'].includes(next.style.loadingStyle)) next.style.loadingStyle = 'standard';
     return next;
   }
 
@@ -1638,8 +1639,9 @@ function protectGlossary(texts, entries) {
 
   function applyAppearance() {
     const root = document.documentElement;
-    root.classList.remove(...PRESETS.map(([id]) => `ot-preset-${id}`), ...MODES.map(id => `ot-mode-${id}`));
+    root.classList.remove(...PRESETS.map(([id]) => `ot-preset-${id}`), ...MODES.map(id => `ot-mode-${id}`), 'ot-loading-apple');
     root.classList.add(`ot-preset-${settings.style.preset}`, `ot-mode-${settings.displayMode}`);
+    if (settings.style.loadingStyle === 'apple') root.classList.add('ot-loading-apple');
 
     const style = settings.style;
     const vars = {
@@ -1716,7 +1718,13 @@ function protectGlossary(texts, entries) {
     const node = document.createElement('div');
     node.className = 'ot-translation ot-pending';
     node.setAttribute(MARK, 'translation');
-    node.textContent = '翻译中…';
+    const sourceLength = clean(el.textContent).length;
+    if (settings.style.loadingStyle === 'apple') {
+      node.classList.add('ot-loading-skeleton');
+      node.style.setProperty('--ot-skeleton-width', `${Math.min(100, Math.max(12, sourceLength * 0.58))}%`);
+    } else {
+      node.textContent = '翻译中…';
+    }
 
     if (settings.displayMode === 'translation') {
       originalHtml.set(el, el.innerHTML);
@@ -1743,11 +1751,13 @@ function protectGlossary(texts, entries) {
   function settle(node, text, error) {
     if (!node?.isConnected) return;
     node.classList.remove('ot-pending');
+    node.classList.remove('ot-loading-skeleton');
     if (error) {
       node.textContent = `翻译失败：${error}`;
       node.classList.add('ot-error');
     } else {
       node.textContent = text;
+      if (settings.style.loadingStyle === 'apple') node.classList.add('ot-result-reveal');
     }
   }
 
@@ -1949,13 +1959,21 @@ function protectGlossary(texts, entries) {
     closeBubble();
     bubble = document.createElement('div');
     bubble.className = 'ot-bubble';
+    if (settings.style.loadingStyle === 'apple') {
+      bubble.classList.add('ot-loading-apple', 'ot-loading-skeleton');
+      bubble.style.setProperty('--ot-skeleton-width', `${Math.min(100, Math.max(24, text.length * 0.58))}%`);
+    }
     bubble.textContent = '翻译中…';
     bubble.style.top = `${Math.min(window.innerHeight - 90, rect.bottom) + window.scrollY + 8}px`;
     bubble.style.left = `${Math.max(8, Math.min(window.innerWidth - 340, rect.left)) + window.scrollX}px`;
     document.body.append(bubble);
     try {
       const [result] = await requestTranslation([text.slice(0, 4000)]);
-      if (bubble) bubble.textContent = result || '没有可显示的译文';
+      if (bubble) {
+        bubble.textContent = result || '没有可显示的译文';
+        bubble.classList.remove('ot-loading-apple', 'ot-loading-skeleton');
+        if (settings.style.loadingStyle === 'apple') bubble.classList.add('ot-result-reveal');
+      }
     } catch (error) {
       if (bubble) {
         bubble.textContent = `翻译失败：${error.message}`;
@@ -2402,6 +2420,10 @@ function protectGlossary(texts, entries) {
             <div class="presets">${PRESETS.map(
               ([id, name]) => `<button type="button" class="preset ${settings.style.preset === id ? 'active' : ''}" data-preset="${id}">${name}</button>`
             ).join('')}</div>
+            <div class="field"><label>翻译中占位样式</label><select data-k="style.loadingStyle">
+              <option value="standard" ${settings.style.loadingStyle === 'standard' ? 'selected' : ''}>标准</option>
+              <option value="apple" ${settings.style.loadingStyle === 'apple' ? 'selected' : ''}>Apple Intelligence 彩色骨架</option>
+            </select></div>
             <div class="field"><label>字号 ${settings.style.fontSize}%</label><input type="range" data-k="style.fontSize" min="60" max="160" step="5" value="${settings.style.fontSize}"></div>
             <div class="field"><label>行高 ${Number(settings.style.lineHeight).toFixed(2)}</label><input type="range" data-k="style.lineHeight" min="1" max="2.4" step="0.05" value="${settings.style.lineHeight}"></div>
             <div class="field"><label>不透明度 ${settings.style.opacity}%</label><input type="range" data-k="style.opacity" min="30" max="100" step="5" value="${settings.style.opacity}"></div>
@@ -2821,6 +2843,66 @@ function protectGlossary(texts, entries) {
       .ot-hover-hidden { display: none !important; }
       .ot-hover-visible { display: inline-block !important; }
       .ot-pending { opacity: calc(var(--ot-op, 1) * .55); font-style: italic; }
+      html.ot-loading-apple .ot-pending { position: relative; display: inline-block; }
+      html.ot-loading-apple .ot-loading-skeleton,
+      .ot-bubble.ot-loading-apple {
+        width: var(--ot-skeleton-width, 42%);
+        min-width: 4em;
+        height: 1.15em;
+        padding: 0;
+        border-radius: .5em;
+        background: linear-gradient(110deg, rgba(255,104,173,.65), rgba(103,172,255,.72), rgba(125,232,198,.68), rgba(255,214,102,.72), rgba(255,104,173,.65));
+        background-size: 260% 100%;
+        animation: ot-loading-shimmer 1.8s linear infinite;
+      }
+      html.ot-loading-apple .ot-loading-skeleton::after,
+      .ot-bubble.ot-loading-apple::after {
+        content: '';
+        position: absolute;
+        inset: 12% 0;
+        z-index: -1;
+        border-radius: 999px;
+        background: linear-gradient(90deg, rgba(255,104,173,.16), rgba(103,172,255,.18), rgba(125,232,198,.16), rgba(255,214,102,.16));
+        background-size: 220% 100%;
+        filter: blur(7px);
+        animation: ot-loading-shimmer 1.8s linear infinite;
+      }
+      html.ot-loading-apple .ot-result-reveal,
+      .ot-bubble.ot-result-reveal {
+        animation: ot-result-reveal .8s ease-out both;
+      }
+      @keyframes ot-loading-shimmer { to { background-position: -260% 0; } }
+      @keyframes ot-result-reveal {
+        0% { opacity: 0; color: #ff68ad; }
+        55% { color: #67acff; }
+        100% { opacity: 1; color: var(--ot-color, inherit); }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        html.ot-loading-apple .ot-loading-skeleton,
+        html.ot-loading-apple .ot-loading-skeleton::after,
+        html.ot-loading-apple .ot-result-reveal,
+        .ot-bubble.ot-loading-skeleton { animation: none; }
+      }
+      .ot-bubble.ot-loading-skeleton {
+        width: var(--ot-skeleton-width, 42%);
+        min-width: 4em;
+        height: 1.15em;
+        padding: 0;
+        border-radius: .5em;
+        color: transparent;
+        background: linear-gradient(110deg, rgba(255,104,173,.65), rgba(103,172,255,.72), rgba(125,232,198,.68), rgba(255,214,102,.72), rgba(255,104,173,.65));
+        background-size: 260% 100%;
+        animation: ot-loading-shimmer 1.8s linear infinite;
+      }
+      .ot-bubble.ot-loading-skeleton::after {
+        content: '';
+        position: absolute;
+        inset: 12% 0;
+        z-index: -1;
+        border-radius: 999px;
+        background: rgba(103,172,255,.18);
+        filter: blur(7px);
+      }
       .ot-error { color: #d92d20 !important; border-color: rgba(217,45,32,.45) !important; background: rgba(217,45,32,.08) !important; }
       .ot-bubble { position: absolute; z-index: 2147483647; max-width: 340px; padding: 10px 12px; border-radius: 10px;
         background: #1b1b24; color: #f4f4f5; box-shadow: 0 12px 34px rgba(0,0,0,.34);

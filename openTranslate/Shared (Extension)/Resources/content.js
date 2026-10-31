@@ -132,8 +132,9 @@
   function applyAppearance() {
     const root = document.documentElement;
     if (!root) return;
-    root.classList.remove(...PRESETS.map(id => `ot-preset-${id}`), ...MODES.map(id => `ot-mode-${id}`));
+    root.classList.remove(...PRESETS.map(id => `ot-preset-${id}`), ...MODES.map(id => `ot-mode-${id}`), 'ot-loading-apple');
     root.classList.add(`ot-preset-${settings.style.preset}`, `ot-mode-${settings.displayMode}`);
+    if (settings.style.loadingStyle === 'apple') root.classList.add('ot-loading-apple');
 
     const style = settings.style;
     const vars = {
@@ -256,7 +257,13 @@
     const node = document.createElement('div');
     node.className = 'ot-translation ot-pending';
     node.setAttribute(MARK, 'translation');
-    node.textContent = '翻译中…';
+    const sourceLength = clean(el.textContent).length;
+    if (settings.style.loadingStyle === 'apple') {
+      node.classList.add('ot-loading-skeleton');
+      node.style.setProperty('--ot-skeleton-width', `${Math.min(100, Math.max(12, sourceLength * 0.58))}%`);
+    } else {
+      node.textContent = '翻译中…';
+    }
 
     if (settings.displayMode === 'translation') {
       originalHtml.set(el, el.innerHTML);
@@ -284,11 +291,13 @@
   function settle(node, text, error) {
     if (!node?.isConnected) return;
     node.classList.remove('ot-pending');
+    node.classList.remove('ot-loading-skeleton');
     if (error) {
       node.textContent = `翻译失败：${error}`;
       node.classList.add('ot-error');
     } else {
       node.textContent = text;
+      if (settings.style.loadingStyle === 'apple') node.classList.add('ot-result-reveal');
     }
   }
 
@@ -500,13 +509,22 @@
     closeBubble();
     bubble = document.createElement('div');
     bubble.className = 'ot-bubble';
-    bubble.textContent = '翻译中…';
+    if (settings.style.loadingStyle === 'apple') {
+      bubble.classList.add('ot-loading-apple', 'ot-loading-skeleton');
+      bubble.style.setProperty('--ot-skeleton-width', `${Math.min(100, Math.max(24, text.length * 0.58))}%`);
+    } else {
+      bubble.textContent = '翻译中…';
+    }
     bubble.style.top = `${Math.min(window.innerHeight - 90, rect.bottom) + window.scrollY + 8}px`;
     bubble.style.left = `${Math.max(8, Math.min(window.innerWidth - 340, rect.left)) + window.scrollX}px`;
     document.body.append(bubble);
     try {
       const [result] = await requestTranslation([text.slice(0, 4000)]);
-      if (bubble) bubble.textContent = result || '没有可显示的译文';
+      if (bubble) {
+        bubble.textContent = result || '没有可显示的译文';
+        bubble.classList.remove('ot-loading-apple', 'ot-loading-skeleton');
+        if (settings.style.loadingStyle === 'apple') bubble.classList.add('ot-result-reveal');
+      }
     } catch (error) {
       if (bubble) {
         bubble.textContent = `翻译失败：${error.message}`;
