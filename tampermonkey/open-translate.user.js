@@ -1677,9 +1677,9 @@
     .dock { position: fixed; display: flex; flex-direction: column; align-items: center; gap: 6px;
       width: 44px; z-index: 2147483647; }
     .dock.snapping { transition: left .24s cubic-bezier(.22,.61,.36,1), top .24s ease; }
-    .gear { display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; padding: 0;
+    .gear { display: flex; align-items: center; justify-content: center; width: 44px; height: 44px; padding: 0;
       border: 0; border-radius: 50%; background: rgba(24,24,32,.9); color: rgba(255,255,255,.88);
-      font-size: 15px; line-height: 1; box-shadow: 0 4px 12px rgba(0,0,0,.24); backdrop-filter: blur(6px);
+      font-size: 18px; line-height: 1; box-shadow: 0 6px 18px rgba(0,0,0,.28); backdrop-filter: blur(6px);
       opacity: .85; cursor: pointer; transition: opacity .15s ease, transform .15s ease, background .15s ease; }
     .gear:hover { opacity: 1; transform: scale(1.08); background: #2a2a38; }
     .ball { display: flex; align-items: center; justify-content: center; width: 44px; height: 44px; padding: 0;
@@ -1811,7 +1811,7 @@
 
   const clampValue = (value, min, max) => Math.min(max, Math.max(min, value));
 
-  const dockHeight = () => (ui?.dock ? ui.dock.offsetHeight || 80 : 80);
+  const dockHeight = () => (ui?.dock ? ui.dock.offsetHeight || 94 : 94);
 
   function placeDock() {
     if (!ui) return;

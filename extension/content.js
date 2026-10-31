@@ -1204,7 +1204,7 @@
   }
 
   function dockHeight() {
-    return dock ? dock.offsetHeight || 82 : 82;
+    return dock ? dock.offsetHeight || 94 : 94;
   }
 
   function applyDockPosition() {

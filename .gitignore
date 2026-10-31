@@ -1,5 +1,5 @@
 # ===== Open-Translate 副产物忽略规则 =====
-# 本仓库源码（extension/、tampermonkey/、.workbuddy-ai/memory/）均为手动维护并纳入版本控制，
+# 本仓库源码（extension/、tampermonkey/）均为手动维护并纳入版本控制，
 # 以下只排除本地可能产生的副产物与构建/打包/编辑器产物。
 
 # ---------- 操作系统 / 编辑器垃圾 ----------
