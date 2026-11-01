@@ -1339,10 +1339,51 @@
     return dock ? dock.offsetHeight || 94 : 94;
   }
 
+  function captchaRects() {
+    const selectors = [
+      'iframe[src*="recaptcha"]',
+      'iframe[src*="hcaptcha"]',
+      'iframe[src*="challenges.cloudflare.com"]',
+      '[class*="captcha" i]',
+      '[id*="captcha" i]',
+      '[data-sitekey]',
+      '.cf-turnstile'
+    ];
+    return selectors.flatMap(selector => [...document.querySelectorAll(selector)])
+      .map(element => element.getBoundingClientRect())
+      .filter(rect => rect.width > 0 && rect.height > 0);
+  }
+
+  function dockPositionAvoidingCaptcha(side, top, height) {
+    const width = dock.offsetWidth || 44;
+    const maxTop = Math.max(8, window.innerHeight - height - 8);
+    const candidates = [
+      [side, top],
+      [side, 0.12], [side, 0.5], [side, 0.88],
+      [side === 'left' ? 'right' : 'left', top],
+      [side === 'left' ? 'right' : 'left', 0.12],
+      [side === 'left' ? 'right' : 'left', 0.5],
+      [side === 'left' ? 'right' : 'left', 0.88]
+    ];
+    const rects = captchaRects();
+    const score = ([candidateSide, candidateTop]) => {
+      const left = candidateSide === 'left' ? 10 : window.innerWidth - 10 - width;
+      const y = clamp(candidateTop * window.innerHeight - height / 2, 8, maxTop);
+      const area = rects.reduce((total, rect) => {
+        const overlapX = Math.max(0, Math.min(left + width, rect.right) - Math.max(left, rect.left));
+        const overlapY = Math.max(0, Math.min(y + height, rect.bottom) - Math.max(y, rect.top));
+        return total + overlapX * overlapY;
+      }, 0);
+      return area * 1000 + (candidateSide === side ? 0 : 1) + Math.abs(candidateTop - top);
+    };
+    return candidates.reduce((best, candidate) => score(candidate) < score(best) ? candidate : best);
+  }
+
   function applyDockPosition() {
     if (!dock) return;
-    const { side, top } = dockPosition();
+    const preferred = dockPosition();
     const height = dockHeight();
+    const [side, top] = dockPositionAvoidingCaptcha(preferred.side, preferred.top, height);
     dock.dataset.side = side;
     dock.style.left = `${side === 'left' ? 10 : window.innerWidth - 54}px`;
     dock.style.top = `${clamp(top * window.innerHeight - height / 2, 8, window.innerHeight - height - 8)}px`;
@@ -1397,10 +1438,8 @@
       const side = rect.left + rect.width / 2 < window.innerWidth / 2 ? 'left' : 'right';
       const top = clamp((rect.top + height / 2) / window.innerHeight, 0.08, 0.92);
       settings.ui.dock = { side, top };
-      dock.dataset.side = side;
       dock.classList.add('is-snapping');
-      dock.style.left = `${side === 'left' ? 10 : window.innerWidth - 54}px`;
-      dock.style.top = `${clamp(top * window.innerHeight - height / 2, 8, window.innerHeight - height - 8)}px`;
+      applyDockPosition();
       setTimeout(() => dock?.classList.remove('is-snapping'), 280);
       persistDock();
       suppressClick = true;
