@@ -3,7 +3,7 @@ name: Pack CRX
 # 推送到 main、或推送/更新任意 tag 时，把 extension/ 目录打成带签名的 CRX3 安装包和 ZIP，
 # 产物挂在本次 Actions run 的 Artifacts 里（默认保留 30 天）。
 #
-# 打 tag 时会额外校验 tag 名与 manifest 版本是否一致（v0.5.0 / 0.5.0 都认），
+# 打 tag 时会额外校验 tag 名与 manifest 版本是否一致（v1.0.0 / 1.0.0 都认），
 # 不一致直接失败，避免打出「版本对不上号」的包。
 #
 # 签名密钥（可选但强烈建议）：

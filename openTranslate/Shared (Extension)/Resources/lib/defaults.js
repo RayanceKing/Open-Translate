@@ -2,7 +2,7 @@ import { normalizeGlossarySettings } from './glossary.js';
 
 // Shared settings model. Imported by the service worker, options page and popup.
 
-export const APP_VERSION = '0.5.0';
+export const APP_VERSION = '1.0.0';
 
 export const deviceLanguage = () => {
   const language = String(globalThis.navigator?.language || '').toLowerCase();
