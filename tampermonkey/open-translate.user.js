@@ -4,6 +4,7 @@
 // @version      0.4.0
 // @description  In-place bilingual translation with switchable engines, AI providers and style presets. Option+T to toggle.
 // @author       Open Translate contributors
+// @license      AGPLv3
 // @match        http://*/*
 // @match        https://*/*
 // @grant        GM_xmlhttpRequest

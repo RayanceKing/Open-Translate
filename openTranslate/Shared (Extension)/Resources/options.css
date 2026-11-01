@@ -1083,6 +1083,17 @@ output {
   flex: 0 0 46px;
 }
 
+.secret-status {
+  width: 100%;
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 4px;
+}
+
+.secret-status.is-set {
+  color: #1f9d55;
+}
+
 .service-foot {
   display: flex;
   align-items: center;

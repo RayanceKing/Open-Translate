@@ -10,13 +10,14 @@
 <div class="app">
   <aside class="sidebar">
     <div class="brand">
-      <div class="logo">译</div>
+      <img class="logo" src="images/icon-256.png" alt="Open Translate">
     </div>
 
     <nav class="nav" id="nav">
       <a class="nav-item is-active" href="#general" data-target="general">通用</a>
       <a class="nav-item" href="#appearance" data-target="appearance">显示样式</a>
       <a class="nav-item" href="#subtitles" data-target="subtitles">视频字幕</a>
+      <a class="nav-item" href="#manga" data-target="manga">漫画模式</a>
       <a class="nav-item" href="#services" data-target="services">翻译服务</a>
       <a class="nav-item" href="#ai" data-target="ai">AI 翻译</a>
       <a class="nav-item" href="#glossary" data-target="glossary">术语库</a>
@@ -382,6 +383,91 @@
           <li><strong>原生 &lt;track&gt;</strong>：页面上带 WebVTT 字幕轨的 HTML5 播放器。</li>
           <li>没有字幕轨的视频（例如直播、纯音乐）无法生成字幕，需要站点自身提供文本。</li>
           <li>字幕同样走翻译缓存，同一段字幕不会重复请求。</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- ============================ 漫画模式 ============================ -->
+    <section class="section" id="manga">
+      <div class="section-head">
+        <h2>漫画模式</h2>
+        <p>用支持视觉的 AI 引擎（OpenAI / Gemini / Claude）识别图片中的文字并翻译，在图片上叠加译文。适合漫画、扫描版截图等以图片承载文字的场景。</p>
+      </div>
+
+      <div class="card">
+        <div class="row">
+          <div class="row-label">
+            <label for="manga-enabled">启用漫画模式</label>
+            <p>开启后，启用翻译时会额外扫描页面里的图片并尝试 OCR + 翻译。建议仅在漫画 / 图片站点开启。</p>
+          </div>
+          <div class="row-control">
+            <label class="switch">
+              <input type="checkbox" id="manga-enabled" data-path="manga.enabled">
+              <span class="slider"></span>
+            </label>
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="row-label">
+            <label for="manga-engine">视觉引擎</label>
+            <p>负责识别与翻译图片文字。需要先在「翻译服务」里为该引擎填写 API Key。</p>
+          </div>
+          <div class="row-control">
+            <select id="manga-engine" data-path="manga.engine"></select>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">叠加层样式</div>
+
+        <div class="row">
+          <div class="row-label"><label for="manga-fontSize">字号</label><p>相对文字框高度的比例，越大越醒目。</p></div>
+          <div class="row-control slider-control">
+            <input type="range" id="manga-fontSize" data-path="manga.style.fontSize" min="40" max="200" step="5">
+            <output data-for="manga.style.fontSize">100%</output>
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="row-label"><label for="manga-opacity">整体不透明度</label></div>
+          <div class="row-control slider-control">
+            <input type="range" id="manga-opacity" data-path="manga.style.opacity" min="20" max="100" step="5">
+            <output data-for="manga.style.opacity">100%</output>
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="row-label"><label for="manga-backgroundOpacity">遮罩浓度</label><p>覆盖原文字块的背景不透明度，越高越能盖住原文。</p></div>
+          <div class="row-control slider-control">
+            <input type="range" id="manga-backgroundOpacity" data-path="manga.style.backgroundOpacity" min="0" max="100" step="5">
+            <output data-for="manga.style.backgroundOpacity">75%</output>
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="row-label"><label>译文颜色</label></div>
+          <div class="row-control inline">
+            <input type="color" id="manga-color" data-path="manga.style.color" aria-label="译文颜色">
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="row-label"><label for="manga-background">遮罩颜色</label></div>
+          <div class="row-control">
+            <input type="color" id="manga-background" data-path="manga.style.background" aria-label="遮罩颜色">
+          </div>
+        </div>
+      </div>
+
+      <div class="card note-card">
+        <div class="card-title">使用须知</div>
+        <ul class="bullets">
+          <li>仅支持 OpenAI、Gemini、Claude 这类多模态模型，其余引擎无法识别图片。</li>
+          <li>图片需允许跨域读取（大多数图床支持），否则会跳过该图并提示。</li>
+          <li>译文以半透明遮罩覆盖原文叠加显示，无法真正抹除原图上的文字。</li>
+          <li>图片会发送给所选视觉引擎，请勿用于含敏感信息的图片。</li>
         </ul>
       </div>
     </section>

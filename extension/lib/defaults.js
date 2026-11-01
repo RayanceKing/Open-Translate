@@ -130,10 +130,24 @@ export const DEFAULT_SETTINGS = {
     showFloatingButton: true,
     theme: 'auto',
     dock: { side: 'right', top: 0.68 }
+  },
+  manga: {
+    enabled: false,
+    engine: 'gemini',
+    style: {
+      fontSize: 100,
+      opacity: 100,
+      backgroundOpacity: 75,
+      color: '#ffffff',
+      background: '#000000'
+    }
   }
 };
 
 export const AI_ENGINES = ['openai', 'deepseek', 'gemini', 'claude', 'custom'];
+
+/** Engines that can read an image and return both OCR + translation in one call. */
+export const VISION_ENGINES = ['openai', 'gemini', 'claude'];
 
 const isPlainObject = value => !!value && typeof value === 'object' && !Array.isArray(value);
 
@@ -187,6 +201,20 @@ export function normalizeSettings(raw) {
   settings.subtitles.background = Boolean(settings.subtitles.background);
   settings.siteRules.blacklist = toList(settings.siteRules.blacklist);
   settings.siteRules.alwaysTranslate = toList(settings.siteRules.alwaysTranslate);
+
+  const rawManga = isPlainObject(raw?.manga) ? raw.manga : {};
+  const rawMangaStyle = isPlainObject(rawManga.style) ? rawManga.style : {};
+  settings.manga = {
+    enabled: Boolean(rawManga.enabled),
+    engine: VISION_ENGINES.includes(rawManga.engine) ? rawManga.engine : 'gemini',
+    style: {
+      fontSize: clamp(Number(rawMangaStyle.fontSize) || 100, 40, 200),
+      opacity: clamp(Number(rawMangaStyle.opacity) || 100, 20, 100),
+      backgroundOpacity: clamp(Number(rawMangaStyle.backgroundOpacity ?? 75) || 75, 0, 100),
+      color: typeof rawMangaStyle.color === 'string' && rawMangaStyle.color ? rawMangaStyle.color : '#ffffff',
+      background: typeof rawMangaStyle.background === 'string' && rawMangaStyle.background ? rawMangaStyle.background : '#000000'
+    }
+  };
   return settings;
 }
 

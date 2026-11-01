@@ -1,9 +1,38 @@
-import { loadSettings } from './lib/store.js';
-import { translateTexts } from './lib/engines.js';
+import { loadSettings, syncFromCloud } from './lib/store.js';
+import { translateTexts, visionOcrTranslate, VISION_ENGINES } from './lib/engines.js';
 import { maskAll } from './lib/privacy.js';
-import { AI_ENGINES } from './lib/defaults.js';
+import { AI_ENGINES, SECRET_FIELDS } from './lib/defaults.js';
+import { nativeSend } from './lib/native.js';
 import { cacheKey, readCache, writeCache, clearCache, cacheStats } from './lib/cache.js';
 import { resolveGlossary, glossarySalt, protectGlossary } from './lib/glossary.js';
+
+// Safari-only extension. API keys (secrets) live in the system Keychain and are
+// reached through the native app extension (see SafariWebExtensionHandler). We
+// keep an in-memory cache so each translation doesn't round-trip to the Keychain.
+let secretCache = {};
+let secretsLoaded = false;
+
+async function refreshSecrets() {
+  try {
+    const reply = await nativeSend({ type: 'secret', action: 'get' });
+    if (reply && reply.secrets) secretCache = reply.secrets;
+  } catch (error) {
+    console.warn('Open Translate: 加载密钥缓存失败。', error);
+  }
+}
+
+async function ensureSecrets() {
+  if (secretsLoaded) return;
+  await refreshSecrets();
+  secretsLoaded = true;
+}
+
+// Prime the cache as soon as the service worker starts.
+refreshSecrets();
+
+// Pull settings from iCloud so a change made on another device is picked up.
+// Writes the newer copy locally; content scripts reload via storage.onChanged.
+syncFromCloud().catch(() => {});
 
 function protectLayout(text) {
   const markers = [];
@@ -28,10 +57,13 @@ function promptSalt(settings, engine) {
 
 async function handleTranslate({ texts = [], engine, source, target }, snapshot, skipCache = false) {
   const settings = snapshot || await loadSettings();
+  await ensureSecrets();
   const useEngine = engine || settings.engine;
   const to = target || settings.targetLanguage;
   const from = source || settings.sourceLanguage || 'auto';
   const config = { ...(settings.engines[useEngine] || {}) };
+  const secretField = SECRET_FIELDS[useEngine];
+  if (secretField && secretCache[useEngine]) config[secretField] = secretCache[useEngine];
   const isAI = AI_ENGINES.includes(useEngine);
   const entries = isAI || settings.glossary?.machineTranslation ? resolveGlossary(settings, to) : [];
   if (isAI) {
@@ -98,11 +130,36 @@ async function handleTest({ engine }) {
   return sample;
 }
 
+// Image OCR + translation for manga mode. The content script sends the image as
+// a data URL; we hand it to a multimodal engine and return detected boxes.
+async function handleTranslateImage({ image, engine, source, target }, snapshot) {
+  const settings = snapshot || await loadSettings();
+  await ensureSecrets();
+  const useEngine = engine || settings.manga.engine;
+  if (!VISION_ENGINES.includes(useEngine)) throw new Error(`该引擎不支持视觉翻译：${useEngine}`);
+  const config = { ...(settings.engines[useEngine] || {}) };
+  const secretField = SECRET_FIELDS[useEngine];
+  if (secretField && secretCache[useEngine]) config[secretField] = secretCache[useEngine];
+  config.temperature = settings.ai.temperature;
+  const boxes = await visionOcrTranslate({
+    engine: useEngine,
+    image,
+    source: source || settings.sourceLanguage || 'auto',
+    target: target || settings.targetLanguage,
+    config
+  });
+  return { boxes };
+}
+
 chrome.runtime.onMessage.addListener((message, _sender, respond) => {
   const fail = error => respond({ error: error?.message || String(error) });
 
   if (message?.type === 'translate') {
     handleTranslate(message).then(texts => respond({ texts })).catch(fail);
+    return true;
+  }
+  if (message?.type === 'translate-image') {
+    handleTranslateImage(message).then(result => respond(result)).catch(fail);
     return true;
   }
   if (message?.type === 'test-engine') {
@@ -117,8 +174,21 @@ chrome.runtime.onMessage.addListener((message, _sender, respond) => {
     clearCache().then(() => respond({ ok: true })).catch(fail);
     return true;
   }
+  if (message?.type === 'native') {
+    const inner = message.message || {};
+    nativeSend(inner)
+      .then(reply => {
+        if (inner.type === 'secret' && (inner.action === 'set' || inner.action === 'delete')) {
+          refreshSecrets().catch(() => {});
+        }
+        respond(reply || {});
+      })
+      .catch(fail);
+    return true;
+  }
   if (message?.type === 'open-options') {
-    chrome.runtime.openOptionsPage();
+    const url = chrome.runtime.getURL('options.html');
+    try { if (typeof chrome.tabs?.create === 'function') chrome.tabs.create({ url }); } catch {}
     respond({ ok: true });
     return false;
   }

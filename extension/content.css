@@ -370,3 +370,53 @@ html.ot-sub-on:not(.ot-sub-ythook) .ytp-caption-window-container * {
   font: 13px/1.4 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
 }
+
+/* ---------- manga / image translation overlay ---------- */
+
+.ot-manga {
+  position: fixed;
+  z-index: 2147483000;
+  pointer-events: none;
+  box-sizing: border-box;
+}
+
+.ot-manga-loading {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(24, 24, 32, 0.82);
+  color: #fff;
+  font: 12px/1.2 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  white-space: nowrap;
+}
+
+.ot-manga-box {
+  position: absolute;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1px 2px;
+  border-radius: 3px;
+  overflow: hidden;
+  background: rgba(0, 0, 0, var(--ot-manga-bg-op, 0.75));
+  color: var(--ot-manga-color, #fff);
+  opacity: var(--ot-manga-op, 1);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  font-weight: 500;
+  line-height: 1.1;
+  font-size: 12px; /* overridden per box by JS based on its pixel height */
+  text-align: center;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  word-break: break-word;
+}
+
+.ot-manga-text {
+  display: inline-block;
+  max-width: 100%;
+}
