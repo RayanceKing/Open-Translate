@@ -181,8 +181,8 @@ jobs:
           REF_NAME: ${{ github.ref_name }}
           COMMIT: ${{ github.sha }}
         run: |
-          # 所有值都走 env：${{ }} 是在交给 shell 之前做文本替换的，直接内联进脚本时，
-          # 值里的反引号 / $() 会被 shell 当成命令执行（tag 名就允许带反引号）。
+          # 所有值都走 env：Action 表达式占位符会在交给 shell 之前先做文本替换；
+          # 若直接把变量内联进脚本，值里的反引号 / $() 会被 shell 当成命令执行（tag 名允许带反引号），所以这里统一用 env 注入。
           if [ "$KEY_SOURCE" = "secret" ]; then
             KEY_NOTE="仓库 Secret CRX_PRIVATE_KEY"
           else
