@@ -10,13 +10,14 @@
 <div class="app">
   <aside class="sidebar">
     <div class="brand">
-      <div class="logo">译</div>
+      <img class="logo" src="images/icon-256.png" alt="Open Translate">
     </div>
 
     <nav class="nav" id="nav">
       <a class="nav-item is-active" href="#general" data-target="general">通用</a>
       <a class="nav-item" href="#appearance" data-target="appearance">显示样式</a>
       <a class="nav-item" href="#subtitles" data-target="subtitles">视频字幕</a>
+      <a class="nav-item" href="#manga" data-target="manga">漫画模式</a>
       <a class="nav-item" href="#services" data-target="services">翻译服务</a>
       <a class="nav-item" href="#ai" data-target="ai">AI 翻译</a>
       <a class="nav-item" href="#glossary" data-target="glossary">术语库</a>
@@ -39,7 +40,7 @@
         <p class="subtitle">所有配置只保存在本机浏览器中，不会上传到任何服务器。</p>
       </div>
       <div class="head-actions">
-        <span class="pill" id="version-label">v0.4.0</span>
+        <span class="pill" id="version-label">v0.5.0</span>
         <span class="save-hint" id="save-hint">已保存</span>
         <button class="ghost" id="reset" type="button">恢复默认</button>
       </div>
@@ -386,6 +387,91 @@
       </div>
     </section>
 
+    <!-- ============================ 漫画模式 ============================ -->
+    <section class="section" id="manga">
+      <div class="section-head">
+        <h2>漫画模式</h2>
+        <p>用支持视觉的 AI 引擎（OpenAI / Gemini / Claude）识别图片中的文字并翻译，在图片上叠加译文。适合漫画、扫描版截图等以图片承载文字的场景。</p>
+      </div>
+
+      <div class="card">
+        <div class="row">
+          <div class="row-label">
+            <label for="manga-enabled">启用漫画模式</label>
+            <p>开启后，启用翻译时会额外扫描页面里的图片并尝试 OCR + 翻译。建议仅在漫画 / 图片站点开启。</p>
+          </div>
+          <div class="row-control">
+            <label class="switch">
+              <input type="checkbox" id="manga-enabled" data-path="manga.enabled">
+              <span class="slider"></span>
+            </label>
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="row-label">
+            <label for="manga-engine">视觉引擎</label>
+            <p>负责识别与翻译图片文字。需要先在「翻译服务」里为该引擎填写 API Key。</p>
+          </div>
+          <div class="row-control">
+            <select id="manga-engine" data-path="manga.engine"></select>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">叠加层样式</div>
+
+        <div class="row">
+          <div class="row-label"><label for="manga-fontSize">字号</label><p>相对文字框高度的比例，越大越醒目。</p></div>
+          <div class="row-control slider-control">
+            <input type="range" id="manga-fontSize" data-path="manga.style.fontSize" min="40" max="200" step="5">
+            <output data-for="manga.style.fontSize">100%</output>
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="row-label"><label for="manga-opacity">整体不透明度</label></div>
+          <div class="row-control slider-control">
+            <input type="range" id="manga-opacity" data-path="manga.style.opacity" min="20" max="100" step="5">
+            <output data-for="manga.style.opacity">100%</output>
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="row-label"><label for="manga-backgroundOpacity">遮罩浓度</label><p>覆盖原文字块的背景不透明度，越高越能盖住原文。</p></div>
+          <div class="row-control slider-control">
+            <input type="range" id="manga-backgroundOpacity" data-path="manga.style.backgroundOpacity" min="0" max="100" step="5">
+            <output data-for="manga.style.backgroundOpacity">75%</output>
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="row-label"><label>译文颜色</label></div>
+          <div class="row-control inline">
+            <input type="color" id="manga-color" data-path="manga.style.color" aria-label="译文颜色">
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="row-label"><label for="manga-background">遮罩颜色</label></div>
+          <div class="row-control">
+            <input type="color" id="manga-background" data-path="manga.style.background" aria-label="遮罩颜色">
+          </div>
+        </div>
+      </div>
+
+      <div class="card note-card">
+        <div class="card-title">使用须知</div>
+        <ul class="bullets">
+          <li>仅支持 OpenAI、Gemini、Claude 这类多模态模型，其余引擎无法识别图片。</li>
+          <li>图片需允许跨域读取（大多数图床支持），否则会跳过该图并提示。</li>
+          <li>译文以半透明遮罩覆盖原文叠加显示，无法真正抹除原图上的文字。</li>
+          <li>图片会发送给所选视觉引擎，请勿用于含敏感信息的图片。</li>
+        </ul>
+      </div>
+    </section>
+
     <!-- ============================ 翻译服务 ============================ -->
     <section class="section" id="services">
       <div class="section-head">
@@ -507,7 +593,8 @@
           <li>Google / MyMemory：请求发往其公共翻译端点，会被对方记录。</li>
           <li>DeepL / Microsoft / LibreTranslate：只发送到你在设置里填写的服务。</li>
           <li>AI 引擎：整段文本会作为提示词发给模型提供方，请勿在敏感页面使用。</li>
-          <li>所有密钥保存在 <code>chrome.storage.local</code>，仅本机可读。</li>
+          <li>所有 API 密钥保存在系统的<b>钥匙串（Keychain）</b>中，由系统加密、仅本机可读，且不会随 iCloud 同步到其他设备。</li>
+          <li>通用设置通过 <b>iCloud 键值存储</b>在登录同一 Apple ID 的 iPhone / iPad / Mac 间同步；密钥不会进入同步。</li>
         </ul>
       </div>
     </section>
@@ -541,7 +628,7 @@
       <div class="card">
         <div class="row">
           <div class="row-label"><label>版本</label><p>设置结构与旧版兼容，升级不会丢失配置。</p></div>
-          <div class="row-control"><span class="pill" id="about-version">v0.4.0</span></div>
+          <div class="row-control"><span class="pill" id="about-version">v0.5.0</span></div>
         </div>
         <div class="row">
           <div class="row-label"><label>配置文件</label><p>导出后可在另一台设备导入。</p></div>

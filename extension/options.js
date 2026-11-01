@@ -7,6 +7,7 @@ import {
   LANGUAGES,
   STYLE_PRESETS,
   SUBTITLE_MODES,
+  VISION_ENGINES,
   normalizeSettings,
   styleToVars
 } from './lib/defaults.js';
@@ -18,9 +19,6 @@ import { parseCustomTerms, serializeGlossaryCsv } from './lib/glossary.js';
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 
-// Apple's on-device system translation only exists inside Safari's Web
-// Extension. Detect Safari by its extension URL scheme and hide the engine
-// (and its option in the engine dropdown) on every other browser.
 const IS_SAFARI = typeof chrome !== 'undefined' && !!chrome.runtime &&
   (chrome.runtime.getURL?.('') || '').startsWith('safari-web-extension:');
 const VISIBLE_ENGINES = ENGINE_CATALOG.filter(engine => engine.id !== 'apple' || IS_SAFARI);
@@ -179,6 +177,14 @@ function renderEngineSelect() {
     const suffix = engine.tag === 'AI' ? ' · AI' : engine.tag === '免费' ? '' : ` · ${engine.tag}`;
     return `<option value="${engine.id}">${engine.name}${suffix}</option>`;
   }).join('');
+}
+
+function renderMangaEngineSelect() {
+  const select = $('#manga-engine');
+  if (!select) return;
+  select.innerHTML = VISION_ENGINES
+    .map(id => `<option value="${id}">${ENGINE_BY_ID[id]?.name || id}</option>`)
+    .join('');
 }
 
 function renderLanguages() {
@@ -399,6 +405,7 @@ function updateEngineNote() {
 function formatValue(path, value) {
   if (path === 'style.lineHeight') return `${Number(value).toFixed(2)}`;
   if (path === 'style.fontSize' || path === 'style.opacity') return `${value}%`;
+  if (path.startsWith('manga.style.')) return `${value}%`;
   if (path === 'subtitles.fontSize' || path === 'subtitles.position') return `${value}%`;
   if (path === 'ai.temperature') return Number(value).toFixed(1);
   if (typeof value === 'number') return `${value}px`;
@@ -655,6 +662,7 @@ function bindNavigation() {
 
 function hydrate() {
   renderServices();
+  renderMangaEngineSelect();
   syncControls();
   $('#glossary-custom').value = settings.glossary.customTerms;
   try {
@@ -671,6 +679,7 @@ async function init() {
     settings = await loadSettings();
 
     renderEngineSelect();
+    renderMangaEngineSelect();
     renderLanguages();
     renderDisplayModes();
     renderSubtitleModes();

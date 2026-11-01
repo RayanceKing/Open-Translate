@@ -5,22 +5,21 @@ import {
   DEFAULT_SETTINGS,
   DISPLAY_MODES,
   LANGUAGES,
+  SECRET_FIELDS,
   STYLE_PRESETS,
   SUBTITLE_MODES,
+  VISION_ENGINES,
   normalizeSettings,
   styleToVars
 } from './lib/defaults.js';
 import { ENGINE_CATALOG, ENGINE_BY_ID } from './lib/catalog.js';
-import { loadSettings, saveSettings } from './lib/store.js';
+import { loadSettings, saveSettings, getAllSecrets, setSecret } from './lib/store.js';
 import { GLOSSARY_SOURCE, GLOSSARY_LIBRARIES } from './lib/glossary-data.js';
 import { parseCustomTerms, serializeGlossaryCsv } from './lib/glossary.js';
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 
-// Apple's on-device system translation only exists inside Safari's Web
-// Extension. Detect Safari by its extension URL scheme and hide the engine
-// (and its option in the engine dropdown) on every other browser.
 const IS_SAFARI = typeof chrome !== 'undefined' && !!chrome.runtime &&
   (chrome.runtime.getURL?.('') || '').startsWith('safari-web-extension:');
 const VISIBLE_ENGINES = ENGINE_CATALOG.filter(engine => engine.id !== 'apple' || IS_SAFARI);
@@ -55,6 +54,7 @@ function sendMessage(message) {
 }
 
 let settings = normalizeSettings(null);
+let secretStatus = {};
 let saveTimer = null;
 let toastTimer = null;
 
@@ -181,6 +181,14 @@ function renderEngineSelect() {
   }).join('');
 }
 
+function renderMangaEngineSelect() {
+  const select = $('#manga-engine');
+  if (!select) return;
+  select.innerHTML = VISION_ENGINES
+    .map(id => `<option value="${id}">${ENGINE_BY_ID[id]?.name || id}</option>`)
+    .join('');
+}
+
 function renderLanguages() {
   const options = LANGUAGES.map(item => `<option value="${item.code}">${item.label}</option>`).join('');
   $('#targetLanguage').innerHTML = options;
@@ -279,11 +287,21 @@ function renderServices() {
             <span class="service-status">${field.hint || ''}</span>
           </div>`;
         }
-        const type = field.type === 'password' ? 'password' : 'text';
+        if (field.type === 'password') {
+          const has = Boolean(secretStatus[engine.id]);
+          const status = has
+            ? '<span class="secret-status is-set">已保存（仅本机钥匙串）</span>'
+            : '<span class="secret-status">未保存</span>';
+          return `<div class="service-field"${depends}${hidden}>
+            <label for="eng-${engine.id}-${field.key}">${field.label}</label>
+            <input type="password" id="eng-${engine.id}-${field.key}" data-engine="${engine.id}" data-key="${field.key}" value="" placeholder="${field.placeholder || ''}" spellcheck="false" autocomplete="off">
+            ${status}
+          </div>`;
+        }
         const value = String(config[field.key] ?? '').replace(/"/g, '&quot;');
         return `<div class="service-field"${depends}${hidden}>
           <label for="eng-${engine.id}-${field.key}">${field.label}</label>
-          <input type="${type}" id="eng-${engine.id}-${field.key}" data-engine="${engine.id}" data-key="${field.key}" value="${value}" placeholder="${field.placeholder || ''}" spellcheck="false" autocomplete="off">
+          <input type="text" id="eng-${engine.id}-${field.key}" data-engine="${engine.id}" data-key="${field.key}" value="${value}" placeholder="${field.placeholder || ''}" spellcheck="false" autocomplete="off">
         </div>`;
       })
       .join('');
@@ -326,6 +344,22 @@ function bindServices() {
     const input = event.target.closest('[data-engine]');
     if (!input) return;
     const { engine, key, kind } = input.dataset;
+    if (SECRET_FIELDS[engine] === key) {
+      // Secret keys go to the system Keychain, never into settings / iCloud.
+      const value = input.value;
+      setSecret(engine, value)
+        .then(() => {
+          secretStatus[engine] = value.trim() ? value.trim() : undefined;
+          const badge = input.parentElement.querySelector('.secret-status');
+          if (badge) {
+            const set = Boolean(value.trim());
+            badge.textContent = set ? '已保存（仅本机钥匙串）' : '未保存';
+            badge.classList.toggle('is-set', set);
+          }
+        })
+        .catch(() => toast('密钥保存失败，请重试'));
+      return;
+    }
     settings.engines[engine] ??= {};
     settings.engines[engine][key] = kind === 'switch' ? input.checked : input.value.trim();
     if (kind === 'switch') syncServiceDeps(input.closest('[data-service]'));
@@ -335,6 +369,9 @@ function bindServices() {
   container.addEventListener('input', event => {
     const input = event.target.closest('[data-engine]');
     if (!input || input.dataset.kind === 'switch') return;
+    // Secrets are persisted on the change event (so we don't hit the Keychain
+    // on every keystroke); ignore them here.
+    if (SECRET_FIELDS[input.dataset.engine] === input.dataset.key) return;
     const { engine, key } = input.dataset;
     settings.engines[engine] ??= {};
     settings.engines[engine][key] = input.value.trim();
@@ -399,6 +436,7 @@ function updateEngineNote() {
 function formatValue(path, value) {
   if (path === 'style.lineHeight') return `${Number(value).toFixed(2)}`;
   if (path === 'style.fontSize' || path === 'style.opacity') return `${value}%`;
+  if (path.startsWith('manga.style.')) return `${value}%`;
   if (path === 'subtitles.fontSize' || path === 'subtitles.position') return `${value}%`;
   if (path === 'ai.temperature') return Number(value).toFixed(1);
   if (typeof value === 'number') return `${value}px`;
@@ -655,6 +693,7 @@ function bindNavigation() {
 
 function hydrate() {
   renderServices();
+  renderMangaEngineSelect();
   syncControls();
   $('#glossary-custom').value = settings.glossary.customTerms;
   try {
@@ -669,8 +708,28 @@ function hydrate() {
 async function init() {
   try {
     settings = await loadSettings();
+    secretStatus = await getAllSecrets();
+
+    // Migrate any plaintext keys left over from before Keychain storage: move
+    // them into the system Keychain, then blank them in settings so they are
+    // never persisted to local storage or iCloud.
+    let migrated = false;
+    for (const [engine, field] of Object.entries(SECRET_FIELDS)) {
+      const value = settings.engines?.[engine]?.[field];
+      if (value) {
+        try {
+          await setSecret(engine, value);
+          settings.engines[engine][field] = '';
+          migrated = true;
+        } catch (_) { /* keep plaintext until a later attempt */ }
+      }
+    }
+    if (migrated) {
+      try { await saveSettings(settings); } catch (_) {}
+    }
 
     renderEngineSelect();
+    renderMangaEngineSelect();
     renderLanguages();
     renderDisplayModes();
     renderSubtitleModes();

@@ -2,7 +2,8 @@
 //   translate({ texts, source, target, config, settings }) -> Promise<string[]>
 // Results keep the same order and length as `texts`.
 
-import { DEFAULT_PROMPT, LANG_LABEL } from './defaults.js';
+import { DEFAULT_PROMPT, LANG_LABEL, VISION_ENGINES } from './defaults.js';
+export { VISION_ENGINES };
 import { formatGlossary } from './glossary.js';
 
 const TIMEOUT = 25000;
@@ -257,11 +258,8 @@ const libre = {
   }
 };
 
-// Apple's on-device system translation. The actual work runs in the Safari Web
-// Extension's native app extension (SafariWebExtensionHandler) through
-// runtime.sendNativeMessage — Safari routes the message to the containing app
-// regardless of the first argument and the JS side only runs inside the
-// extension's background page, which is allowed to call native messaging.
+// ---------------------------------------------------------------- AI engines
+
 const apple = {
   id: 'apple',
   async translate({ texts, source = 'auto', target }) {
@@ -281,22 +279,19 @@ const apple = {
         settled = true;
         reject(new Error('系统翻译响应超时，请确认设备已下载对应语言包'));
       }, 25000);
+      const complete = response => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        const lastError = runtime.lastError;
+        if (lastError) reject(new Error(lastError.message || '调用系统翻译失败'));
+        else resolve(response);
+      };
       try {
-        const application = 'com.stuwang.openTranslate.Extension';
-        const complete = response => {
-          if (settled) return;
-          settled = true;
-          clearTimeout(timer);
-          const lastError = runtime.lastError;
-          if (lastError) reject(new Error(lastError.message || '调用系统翻译失败'));
-          else resolve(response);
-        };
-        const result = usesPromiseApi
-          ? runtime.sendNativeMessage(application, { type: 'translate', texts, source, target })
-          : runtime.sendNativeMessage(application, { type: 'translate', texts, source, target }, complete);
-        if (result && typeof result.then === 'function') {
-          result.then(complete, reject);
-        }
+        const pending = usesPromiseApi
+          ? runtime.sendNativeMessage('com.stuwang.openTranslate.Extension', { type: 'translate', texts, source, target })
+          : runtime.sendNativeMessage('com.stuwang.openTranslate.Extension', { type: 'translate', texts, source, target }, complete);
+        if (pending && typeof pending.then === 'function') pending.then(complete, reject);
       } catch (error) {
         if (settled) return;
         settled = true;
@@ -305,14 +300,12 @@ const apple = {
       }
     });
     if (reply?.error) throw new Error(reply.error);
-    if (!reply || !Array.isArray(reply.texts) || reply.texts.length !== texts.length) {
+    if (!Array.isArray(reply?.texts) || reply.texts.length !== texts.length) {
       throw new Error('系统翻译返回了意外的数据格式');
     }
     return reply.texts;
   }
 };
-
-// ---------------------------------------------------------------- AI engines
 
 function buildPrompt({ texts, source, target, config }) {
   const template = String(config.prompt || '').trim() || DEFAULT_PROMPT;
@@ -455,6 +448,150 @@ const claude = {
     }, { texts, source, target, config });
   }
 };
+
+// ---------------------------------------------------------------- vision (OCR + translate)
+//
+// Multimodal engines can read an image and return both the detected text and its
+// translation in a single call. We ask for a strict JSON array of bounding boxes
+// (normalized 0–1) so the content script can paint each translation back onto
+// the original panel. Only the engines in VISION_ENGINES support this path.
+
+function splitDataUrl(dataUrl) {
+  const match = /^data:([^;]+);base64,(.*)$/s.exec(String(dataUrl || ''));
+  if (!match) return ['image/png', ''];
+  return [match[1] || 'image/png', match[2]];
+}
+
+function clamp01(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return 0;
+  return Math.min(1, Math.max(0, number));
+}
+
+const VISION_SYSTEM =
+  'You are a precise comic / manga OCR and translation assistant. The image ' +
+  'likely contains text (speech bubbles, captions, signs) in its original ' +
+  'language. Detect every distinct text region, translate it, and report its ' +
+  'bounding box. Respond with STRICT JSON only — a single JSON array, no code ' +
+  'fences and no commentary. Each element must be: ' +
+  '{"box":[x,y,w,h],"text":"original","translation":"translated"}. ' +
+  'Coordinates are normalized to 0–1 relative to the image, where x,y is the ' +
+  'top-left corner and w,h are width and height. If there is no text, return [].';
+
+function visionUserPrompt(target) {
+  return `Translate every text region into ${targetLabel(target)}. Keep the translation faithful and concise. Return only the JSON array described.`;
+}
+
+async function visionOpenAi({ image, prompt, config }) {
+  const apiKey = String(config.apiKey || '').trim();
+  if (!apiKey && !config.allowAnonymous) throw new Error('尚未填写 API Key');
+  const base = trimSlash(config.baseUrl) || (config.allowAnonymous ? '' : 'https://api.openai.com/v1');
+  if (!base) throw new Error('尚未填写接口地址');
+  const data = await http(`${base}/chat/completions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+    body: JSON.stringify({
+      model: config.model || 'gpt-4o-mini',
+      temperature: Number(config.temperature ?? 0.2),
+      messages: [
+        { role: 'system', content: VISION_SYSTEM },
+        { role: 'user', content: [
+          { type: 'text', text: prompt },
+          { type: 'image_url', image_url: { url: image } }
+        ] }
+      ]
+    })
+  }, TIMEOUT + 40000);
+  const content = data?.choices?.[0]?.message?.content;
+  if (!content) throw new Error('模型没有返回结果');
+  return content;
+}
+
+async function visionGemini({ image, prompt, config }) {
+  const apiKey = String(config.apiKey || '').trim();
+  if (!apiKey) throw new Error('尚未填写 Gemini API Key');
+  const model = config.model || 'gemini-2.0-flash';
+  const [mime, b64] = splitDataUrl(image);
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+  const data = await http(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      systemInstruction: { parts: [{ text: VISION_SYSTEM }] },
+      contents: [{ role: 'user', parts: [
+        { text: prompt },
+        { inline_data: { mimeType: mime, data: b64 } }
+      ] }],
+      generationConfig: { temperature: Number(config.temperature ?? 0.2) }
+    })
+  }, TIMEOUT + 40000);
+  const parts = data?.candidates?.[0]?.content?.parts;
+  const content = Array.isArray(parts) ? parts.map(part => part.text || '').join('') : '';
+  if (!content) throw new Error('模型没有返回结果');
+  return content;
+}
+
+async function visionClaude({ image, prompt, config }) {
+  const apiKey = String(config.apiKey || '').trim();
+  if (!apiKey) throw new Error('尚未填写 Anthropic API Key');
+  const [mime, b64] = splitDataUrl(image);
+  const data = await http('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true'
+    },
+    body: JSON.stringify({
+      model: config.model || 'claude-3-5-haiku-latest',
+      max_tokens: 4096,
+      temperature: Number(config.temperature ?? 0.2),
+      system: VISION_SYSTEM,
+      messages: [{ role: 'user', content: [
+        { type: 'image', source: { type: 'base64', media_type: mime, data: b64 } },
+        { type: 'text', text: prompt }
+      ] }]
+    })
+  }, TIMEOUT + 40000);
+  const content = Array.isArray(data?.content)
+    ? data.content.filter(block => block.type === 'text').map(block => block.text).join('')
+    : '';
+  if (!content) throw new Error('模型没有返回结果');
+  return content;
+}
+
+function parseVisionResult(raw) {
+  let text = String(raw || '').trim();
+  const fence = /^```(?:json)?\s*([\s\S]*?)\s*```$/i.exec(text);
+  if (fence) text = fence[1].trim();
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    throw new Error('视觉模型返回的不是有效 JSON');
+  }
+  if (!Array.isArray(data)) throw new Error('视觉模型返回的格式不正确');
+  const boxes = [];
+  for (const item of data) {
+    const box = Array.isArray(item?.box) ? item.box : null;
+    if (!box || box.length !== 4) continue;
+    const coords = box.map(clamp01);
+    if (coords.some(value => !Number.isFinite(value))) continue;
+    const text = String(item.text || '').trim();
+    const translation = String(item.translation || '').trim();
+    if (!translation && !text) continue;
+    boxes.push({ box: coords, text, translation: translation || text });
+  }
+  return boxes;
+}
+
+export async function visionOcrTranslate({ engine, image, source = 'auto', target, config = {} }) {
+  if (!VISION_ENGINES.includes(engine)) throw new Error('该引擎不支持视觉翻译，请选择 OpenAI / Gemini / Claude');
+  const caller = engine === 'gemini' ? visionGemini : engine === 'claude' ? visionClaude : visionOpenAi;
+  const raw = await caller({ image, prompt: visionUserPrompt(target), config });
+  return parseVisionResult(raw);
+}
 
 // ---------------------------------------------------------------- registry
 

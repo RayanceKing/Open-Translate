@@ -1,9 +1,15 @@
 import { loadSettings } from './lib/store.js';
-import { translateTexts } from './lib/engines.js';
+import { translateTexts, visionOcrTranslate, VISION_ENGINES } from './lib/engines.js';
 import { maskAll } from './lib/privacy.js';
 import { AI_ENGINES } from './lib/defaults.js';
 import { cacheKey, readCache, writeCache, clearCache, cacheStats } from './lib/cache.js';
 import { resolveGlossary, glossarySalt, protectGlossary } from './lib/glossary.js';
+
+// Safari's Web Extension shim does not implement chrome.runtime.openOptionsPage
+// (it is a no-op / throws), so on Safari we open the settings page with
+// chrome.tabs.create instead. Detect Safari by its extension URL scheme.
+const IS_SAFARI = typeof chrome !== 'undefined' && !!chrome.runtime &&
+  (chrome.runtime.getURL?.('') || '').startsWith('safari-web-extension:');
 
 function protectLayout(text) {
   const markers = [];
@@ -98,11 +104,33 @@ async function handleTest({ engine }) {
   return sample;
 }
 
+// Image OCR + translation for manga mode. The content script sends the image as
+// a data URL; we hand it to a multimodal engine and return detected boxes.
+async function handleTranslateImage({ image, engine, source, target }, snapshot) {
+  const settings = snapshot || await loadSettings();
+  const useEngine = engine || settings.manga.engine;
+  if (!VISION_ENGINES.includes(useEngine)) throw new Error(`该引擎不支持视觉翻译：${useEngine}`);
+  const config = { ...(settings.engines[useEngine] || {}) };
+  config.temperature = settings.ai.temperature;
+  const boxes = await visionOcrTranslate({
+    engine: useEngine,
+    image,
+    source: source || settings.sourceLanguage || 'auto',
+    target: target || settings.targetLanguage,
+    config
+  });
+  return { boxes };
+}
+
 chrome.runtime.onMessage.addListener((message, _sender, respond) => {
   const fail = error => respond({ error: error?.message || String(error) });
 
   if (message?.type === 'translate') {
     handleTranslate(message).then(texts => respond({ texts })).catch(fail);
+    return true;
+  }
+  if (message?.type === 'translate-image') {
+    handleTranslateImage(message).then(result => respond(result)).catch(fail);
     return true;
   }
   if (message?.type === 'test-engine') {
@@ -118,7 +146,16 @@ chrome.runtime.onMessage.addListener((message, _sender, respond) => {
     return true;
   }
   if (message?.type === 'open-options') {
-    chrome.runtime.openOptionsPage();
+    const url = chrome.runtime.getURL('options.html');
+    const openByTab = () => {
+      try { if (typeof chrome.tabs?.create === 'function') chrome.tabs.create({ url }); } catch {}
+    };
+    try {
+      if (IS_SAFARI || typeof chrome.runtime.openOptionsPage !== 'function') openByTab();
+      else chrome.runtime.openOptionsPage();
+    } catch {
+      openByTab();
+    }
     respond({ ok: true });
     return false;
   }

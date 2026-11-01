@@ -67,7 +67,12 @@
       shortcut: 'Alt+S'
     },
     siteRules: { blacklist: [], alwaysTranslate: [] },
-    ui: { showFloatingButton: true, dock: { side: 'right', top: 0.68 } }
+    ui: { showFloatingButton: true, dock: { side: 'right', top: 0.68 } },
+    manga: {
+      enabled: false,
+      engine: 'gemini',
+      style: { fontSize: 100, opacity: 100, backgroundOpacity: 75, color: '#ffffff', background: '#000000' }
+    }
   };
 
   let settings = structuredClone(DEFAULTS);
@@ -478,6 +483,7 @@
     originalHtml.clear();
     document.querySelectorAll(`[${MARK}]`).forEach(node => node.remove());
     translating = new WeakSet();
+    restoreManga();
     renderDock();
   }
 
@@ -494,6 +500,7 @@
     // the observer / next scroll tick.
     flushVisible();
     startSweeping();
+    if (settings.manga?.enabled) startManga();
   }
 
   function toggle() {
@@ -509,6 +516,7 @@
         for (const node of record.addedNodes) {
           if (node.nodeType !== 1 || node.hasAttribute?.(MARK)) continue;
           scan(node);
+          if (mangaActive) mangaScan(node);
         }
       }
     });
@@ -1313,6 +1321,241 @@
     startSubtitles();
   });
 
+  // ---------------------------------------------------------------- manga / image translation
+  //
+  // Comic / manga panels are images, not text, so the normal text walker skips
+  // them (img/svg/canvas are in SKIP). In manga mode we instead scan <img>
+  // elements, OCR + translate each in one vision-API call (handled in the
+  // background), then paint the translations back as a fixed-position overlay
+  // aligned to the image and kept glued to it every animation frame.
+
+  const MANGA_MIN_EDGE = 160;   // ignore icons / decorative images
+  const MANGA_MAX_EDGE = 1600;  // downscale larger images before upload
+  let mangaActive = false;
+  let mangaRaf = 0;
+  let mangaScanScheduled = false;
+  const mangaOverlays = new Map();   // img -> { overlay, boxes }
+  const mangaPending = new Set();    // imgs currently being processed
+  let mangaProcessed = new WeakSet();
+
+  function isMangaCandidate(img) {
+    if (!img || img.tagName !== 'IMG') return false;
+    if (img.classList.contains('ot-manga-done')) return false;
+    const w = img.naturalWidth || img.width;
+    const h = img.naturalHeight || img.height;
+    if (!w || !h || w < MANGA_MIN_EDGE || h < MANGA_MIN_EDGE) return false;
+    return true;
+  }
+
+  function collectMangaImages(scope) {
+    const root = scope === document ? document : (scope || document);
+    return [...root.querySelectorAll('img')].filter(isMangaCandidate);
+  }
+
+  // Cross-origin images taint a canvas unless the host sends CORS headers. We
+  // re-fetch with crossOrigin="anonymous" (served from the HTTP cache, so it is
+  // fast); if the host does not allow it, toDataURL throws and the caller skips
+  // that image instead of crashing the whole page.
+  function imageToDataUrl(img) {
+    return new Promise((resolve, reject) => {
+      const src = img.currentSrc || img.src;
+      if (!src) {
+        reject(new Error('图片没有可用的地址'));
+        return;
+      }
+      const loader = new Image();
+      if (!src.startsWith('data:')) {
+        loader.crossOrigin = 'anonymous';
+        loader.referrerPolicy = 'no-referrer';
+      }
+      loader.onload = () => {
+        try {
+          resolve(downscaleImage(loader));
+        } catch (error) {
+          reject(error);
+        }
+      };
+      loader.onerror = () => reject(new Error('图片加载失败（可能受跨域限制）'));
+      loader.src = src;
+    });
+  }
+
+  function downscaleImage(loader) {
+    const naturalWidth = loader.naturalWidth || loader.width;
+    const naturalHeight = loader.naturalHeight || loader.height;
+    const scale = Math.min(1, MANGA_MAX_EDGE / Math.max(naturalWidth, naturalHeight));
+    const width = Math.max(1, Math.round(naturalWidth * scale));
+    const height = Math.max(1, Math.round(naturalHeight * scale));
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext('2d');
+    context.drawImage(loader, 0, 0, width, height);
+    try {
+      return canvas.toDataURL('image/png');
+    } catch {
+      throw new Error('无法读取图片像素（跨域限制），请尝试更换图源或关闭漫画模式');
+    }
+  }
+
+  function createMangaOverlay(img) {
+    const overlay = document.createElement('div');
+    overlay.className = 'ot-manga';
+    overlay.setAttribute('data-ot-manga-overlay', '');
+    overlay.style.pointerEvents = 'none';
+    overlay.style.position = 'fixed';
+    const loading = document.createElement('div');
+    loading.className = 'ot-manga-loading';
+    loading.textContent = '识别中…';
+    overlay.append(loading);
+    document.body.append(overlay);
+    return overlay;
+  }
+
+  function fillMangaOverlay(overlay, boxes) {
+    const style = settings.manga.style;
+    overlay.style.setProperty('--ot-manga-color', style.color);
+    overlay.style.setProperty('--ot-manga-bg', style.background);
+    overlay.style.setProperty('--ot-manga-bg-op', String(style.backgroundOpacity / 100));
+    overlay.style.setProperty('--ot-manga-op', String(style.opacity / 100));
+    overlay.replaceChildren();
+    const fragment = document.createDocumentFragment();
+    for (const item of boxes) {
+      const [x, y, w, h] = item.box;
+      const box = document.createElement('div');
+      box.className = 'ot-manga-box';
+      box.style.left = `${(x * 100).toFixed(3)}%`;
+      box.style.top = `${(y * 100).toFixed(3)}%`;
+      box.style.width = `${(w * 100).toFixed(3)}%`;
+      box.style.height = `${(h * 100).toFixed(3)}%`;
+      const span = document.createElement('span');
+      span.className = 'ot-manga-text';
+      span.textContent = item.translation;
+      box.append(span);
+      fragment.append(box);
+    }
+    overlay.append(fragment);
+  }
+
+  function positionManga() {
+    const scale = (settings.manga.style.fontSize || 100) / 100;
+    for (const [img, rec] of mangaOverlays) {
+      if (!img.isConnected) {
+        rec.overlay.remove();
+        mangaOverlays.delete(img);
+        continue;
+      }
+      const rect = img.getBoundingClientRect();
+      const overlay = rec.overlay;
+      if (rect.width < 1 || rect.height < 1 || rect.bottom < -300 || rect.top > window.innerHeight + 300) {
+        overlay.style.visibility = 'hidden';
+        continue;
+      }
+      overlay.style.visibility = 'visible';
+      overlay.style.left = `${rect.left}px`;
+      overlay.style.top = `${rect.top}px`;
+      overlay.style.width = `${rect.width}px`;
+      overlay.style.height = `${rect.height}px`;
+      for (const box of overlay.querySelectorAll('.ot-manga-box')) {
+        const heightPercent = parseFloat(box.style.height) / 100;
+        box.style.fontSize = `${Math.max(7, heightPercent * rect.height * scale)}px`;
+      }
+    }
+  }
+
+  function startMangaLoop() {
+    if (mangaRaf) return;
+    const step = () => {
+      if (!mangaActive) {
+        mangaRaf = 0;
+        return;
+      }
+      positionManga();
+      mangaRaf = requestAnimationFrame(step);
+    };
+    mangaRaf = requestAnimationFrame(step);
+  }
+
+  async function processMangaImage(img) {
+    if (!img.isConnected || mangaProcessed.has(img) || img.classList.contains('ot-manga-done')) return;
+    mangaProcessed.add(img);
+    img.classList.add('ot-manga-done');
+    const overlay = createMangaOverlay(img);
+    try {
+      const image = await imageToDataUrl(img);
+      if (!mangaActive) {
+        overlay.remove();
+        return;
+      }
+      const result = await sendMessage({
+        type: 'translate-image',
+        image,
+        source: settings.sourceLanguage || 'auto',
+        target: settings.targetLanguage,
+        engine: settings.manga.engine
+      });
+      if (!mangaActive) {
+        overlay.remove();
+        return;
+      }
+      if (!result || result.error) throw new Error(result?.error || '后台没有响应');
+      const boxes = Array.isArray(result.boxes) ? result.boxes : [];
+      if (!boxes.length) {
+        overlay.remove();
+        return;
+      }
+      fillMangaOverlay(overlay, boxes);
+      mangaOverlays.set(img, { overlay, boxes });
+      startMangaLoop();
+    } catch (error) {
+      overlay.remove();
+      toast(`漫画翻译跳过一张图：${error?.message || '失败'}`);
+    }
+  }
+
+  function mangaScan(scope = document) {
+    if (!mangaActive) return;
+    const images = collectMangaImages(scope);
+    for (const img of images) {
+      if (mangaProcessed.has(img) || mangaPending.has(img)) continue;
+      if (!inViewport(img, 500)) continue; // only the panels near the viewport
+      mangaPending.add(img);
+      processMangaImage(img).finally(() => mangaPending.delete(img));
+    }
+  }
+
+  function mangaOnScroll() {
+    if (!mangaActive || mangaScanScheduled) return;
+    mangaScanScheduled = true;
+    setTimeout(() => {
+      mangaScanScheduled = false;
+      mangaScan(document);
+    }, 120);
+  }
+
+  function startManga() {
+    if (mangaActive) return;
+    mangaActive = true;
+    mangaScan(document);
+    startMangaLoop();
+    addEventListener('scroll', mangaOnScroll, { passive: true, capture: true });
+    addEventListener('resize', mangaOnScroll, { passive: true });
+  }
+
+  function restoreManga() {
+    mangaActive = false;
+    if (mangaRaf) cancelAnimationFrame(mangaRaf);
+    mangaRaf = 0;
+    mangaScanScheduled = false;
+    removeEventListener('scroll', mangaOnScroll, { capture: true });
+    removeEventListener('resize', mangaOnScroll);
+    for (const [, rec] of mangaOverlays) rec.overlay.remove();
+    mangaOverlays.clear();
+    mangaPending.clear();
+    document.querySelectorAll('img.ot-manga-done').forEach(img => img.classList.remove('ot-manga-done'));
+    mangaProcessed = new WeakSet();
+  }
+
   // ---------------------------------------------------------------- floating dock
 
   function toast(message) {
@@ -1324,6 +1567,17 @@
   }
 
   function openOptions() {
+    // Open the options page directly from the content script. This is reliable
+    // on both Chrome and Safari/iOS; the background `open-options` path is kept
+    // only as a last-resort fallback (Safari's service worker cannot always
+    // create a tab on its own).
+    try {
+      if (typeof chrome !== 'undefined' && chrome.tabs && typeof chrome.tabs.create === 'function'
+          && typeof chrome.runtime?.getURL === 'function') {
+        chrome.tabs.create({ url: chrome.runtime.getURL('options.html') });
+        return;
+      }
+    } catch (_) { /* fall through to the background fallback */ }
     sendMessage({ type: 'open-options' }).catch(() => {});
   }
 
@@ -1339,10 +1593,51 @@
     return dock ? dock.offsetHeight || 94 : 94;
   }
 
+  function captchaRects() {
+    const selectors = [
+      'iframe[src*="recaptcha"]',
+      'iframe[src*="hcaptcha"]',
+      'iframe[src*="challenges.cloudflare.com"]',
+      '[class*="captcha" i]',
+      '[id*="captcha" i]',
+      '[data-sitekey]',
+      '.cf-turnstile'
+    ];
+    return selectors.flatMap(selector => [...document.querySelectorAll(selector)])
+      .map(element => element.getBoundingClientRect())
+      .filter(rect => rect.width > 0 && rect.height > 0);
+  }
+
+  function dockPositionAvoidingCaptcha(side, top, height) {
+    const width = dock.offsetWidth || 44;
+    const maxTop = Math.max(8, window.innerHeight - height - 8);
+    const candidates = [
+      [side, top],
+      [side, 0.12], [side, 0.5], [side, 0.88],
+      [side === 'left' ? 'right' : 'left', top],
+      [side === 'left' ? 'right' : 'left', 0.12],
+      [side === 'left' ? 'right' : 'left', 0.5],
+      [side === 'left' ? 'right' : 'left', 0.88]
+    ];
+    const rects = captchaRects();
+    const score = ([candidateSide, candidateTop]) => {
+      const left = candidateSide === 'left' ? 10 : window.innerWidth - 10 - width;
+      const y = clamp(candidateTop * window.innerHeight - height / 2, 8, maxTop);
+      const area = rects.reduce((total, rect) => {
+        const overlapX = Math.max(0, Math.min(left + width, rect.right) - Math.max(left, rect.left));
+        const overlapY = Math.max(0, Math.min(y + height, rect.bottom) - Math.max(y, rect.top));
+        return total + overlapX * overlapY;
+      }, 0);
+      return area * 1000 + (candidateSide === side ? 0 : 1) + Math.abs(candidateTop - top);
+    };
+    return candidates.reduce((best, candidate) => score(candidate) < score(best) ? candidate : best);
+  }
+
   function applyDockPosition() {
     if (!dock) return;
-    const { side, top } = dockPosition();
+    const preferred = dockPosition();
     const height = dockHeight();
+    const [side, top] = dockPositionAvoidingCaptcha(preferred.side, preferred.top, height);
     dock.dataset.side = side;
     dock.style.left = `${side === 'left' ? 10 : window.innerWidth - 54}px`;
     dock.style.top = `${clamp(top * window.innerHeight - height / 2, 8, window.innerHeight - height - 8)}px`;
@@ -1397,10 +1692,8 @@
       const side = rect.left + rect.width / 2 < window.innerWidth / 2 ? 'left' : 'right';
       const top = clamp((rect.top + height / 2) / window.innerHeight, 0.08, 0.92);
       settings.ui.dock = { side, top };
-      dock.dataset.side = side;
       dock.classList.add('is-snapping');
-      dock.style.left = `${side === 'left' ? 10 : window.innerWidth - 54}px`;
-      dock.style.top = `${clamp(top * window.innerHeight - height / 2, 8, window.innerHeight - height - 8)}px`;
+      applyDockPosition();
       setTimeout(() => dock?.classList.remove('is-snapping'), 280);
       persistDock();
       suppressClick = true;

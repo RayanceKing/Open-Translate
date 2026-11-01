@@ -1,9 +1,10 @@
 // ==UserScript==
 // @name         Open Translate · Bilingual Web Reader
 // @namespace    https://github.com/open-translate
-// @version      0.4.0
+// @version      0.5.0
 // @description  In-place bilingual translation with switchable engines, AI providers and style presets. Option+T to toggle.
 // @author       Open Translate contributors
+// @license      AGPLv3
 // @match        http://*/*
 // @match        https://*/*
 // @grant        GM_xmlhttpRequest
@@ -2316,10 +2317,51 @@ function protectGlossary(texts, entries) {
 
   const dockHeight = () => (ui?.dock ? ui.dock.offsetHeight || 94 : 94);
 
+  function captchaRects() {
+    const selectors = [
+      'iframe[src*="recaptcha"]',
+      'iframe[src*="hcaptcha"]',
+      'iframe[src*="challenges.cloudflare.com"]',
+      '[class*="captcha" i]',
+      '[id*="captcha" i]',
+      '[data-sitekey]',
+      '.cf-turnstile'
+    ];
+    return selectors.flatMap(selector => [...document.querySelectorAll(selector)])
+      .map(element => element.getBoundingClientRect())
+      .filter(rect => rect.width > 0 && rect.height > 0);
+  }
+
+  function placeDockAvoidingCaptcha(side, top, height) {
+    const width = ui.dock.offsetWidth || 44;
+    const maxTop = Math.max(8, window.innerHeight - height - 8);
+    const candidates = [
+      [side, top],
+      [side, 0.12], [side, 0.5], [side, 0.88],
+      [side === 'left' ? 'right' : 'left', top],
+      [side === 'left' ? 'right' : 'left', 0.12],
+      [side === 'left' ? 'right' : 'left', 0.5],
+      [side === 'left' ? 'right' : 'left', 0.88]
+    ];
+    const rects = captchaRects();
+    const score = ([candidateSide, candidateTop]) => {
+      const left = candidateSide === 'left' ? 10 : window.innerWidth - 10 - width;
+      const y = clampValue(candidateTop * window.innerHeight - height / 2, 8, maxTop);
+      const area = rects.reduce((total, rect) => {
+        const overlapX = Math.max(0, Math.min(left + width, rect.right) - Math.max(left, rect.left));
+        const overlapY = Math.max(0, Math.min(y + height, rect.bottom) - Math.max(y, rect.top));
+        return total + overlapX * overlapY;
+      }, 0);
+      return area * 1000 + (candidateSide === side ? 0 : 1) + Math.abs(candidateTop - top);
+    };
+    return candidates.reduce((best, candidate) => score(candidate) < score(best) ? candidate : best);
+  }
+
   function placeDock() {
     if (!ui) return;
-    const { side, top } = dockPosition();
+    const preferred = dockPosition();
     const height = dockHeight();
+    const [side, top] = placeDockAvoidingCaptcha(preferred.side, preferred.top, height);
     ui.dock.dataset.side = side;
     ui.dock.style.left = `${side === 'left' ? 10 : window.innerWidth - 54}px`;
     ui.dock.style.top = `${clampValue(top * window.innerHeight - height / 2, 8, window.innerHeight - height - 8)}px`;
@@ -2370,10 +2412,8 @@ function protectGlossary(texts, entries) {
       const top = clampValue((rect.top + height / 2) / window.innerHeight, 0.08, 0.92);
       settings.ui.dock = { side, top };
       persist();
-      ui.dock.dataset.side = side;
       ui.dock.classList.add('snapping');
-      ui.dock.style.left = `${side === 'left' ? 10 : window.innerWidth - 54}px`;
-      ui.dock.style.top = `${clampValue(top * window.innerHeight - height / 2, 8, window.innerHeight - height - 8)}px`;
+      placeDock();
       setTimeout(() => ui.dock.classList.remove('snapping'), 280);
       suppressClick = true;
       setTimeout(() => {
@@ -2426,7 +2466,7 @@ function protectGlossary(texts, entries) {
       <div class="dialog" role="dialog" aria-modal="true">
         <div class="head">
           <h2>Open Translate 设置</h2>
-          <span class="ver">v0.4.0</span>
+          <span class="ver">v0.5.0</span>
           <button class="close" type="button" aria-label="关闭">✕</button>
         </div>
         <div class="tabs">
