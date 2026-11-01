@@ -1,17 +1,5 @@
 name: Pack CRX
 
-# 推送到 main、或推送/更新任意 tag 时，把 extension/ 目录打成带签名的 CRX3 安装包和 ZIP，
-# 产物挂在本次 Actions run 的 Artifacts 里（默认保留 30 天）。
-#
-# 打 tag 时会额外校验 tag 名与 manifest 版本是否一致（v1.0.0 / 1.0.0 都认），
-# 不一致直接失败，避免打出「版本对不上号」的包。
-#
-# 签名密钥（可选但强烈建议）：
-#   仓库 Settings → Secrets and variables → Actions → New repository secret
-#   Name: CRX_PRIVATE_KEY
-#   Value: 本地 `openssl genrsa -out key.pem 2048` 生成后，`base64 -i key.pem` 的整段输出
-# 配了它，扩展 ID 才固定；没配则每次跑用临时密钥，ID 每次都不一样（仅供临时试用）。
-# key.pem 千万不要提交到仓库（.gitignore 已排除 *.pem）。
 
 on:
   push:
@@ -20,7 +8,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write # 打 tag 时创建 Release 并上传资源需要写权限
 
 concurrency:
   group: pack-crx-${{ github.ref }}
@@ -170,6 +158,34 @@ jobs:
           path: dist/
           if-no-files-found: error
           retention-days: 30
+
+      - name: Publish release assets
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ steps.meta.outputs.version }}
+          EXT_ID: ${{ steps.key.outputs.ext_id }}
+          KEY_SOURCE: ${{ steps.key.outputs.source }}
+          COMMIT: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG 已存在，追加/覆盖资源"
+            gh release upload "$TAG" dist/*.crx dist/*.zip dist/SHA256SUMS.txt --clobber
+          else
+            NOTES="Open-Translate v$VERSION
+            扩展 ID: $EXT_ID
+            签名密钥来源: $KEY_SOURCE
+            提交: $COMMIT
+            下载:
+            - .crx 签名安装包（Chrome 对非商店来源 .crx 有策略限制，装不上时请用 .zip）
+            - .zip 开发者模式解压加载 / 上架用
+            - SHA256SUMS.txt 校验和"
+            gh release create "$TAG" dist/*.crx dist/*.zip dist/SHA256SUMS.txt \
+              --title "Open-Translate v$VERSION" \
+              --notes "$NOTES"
+          fi
 
       - name: Summary
         env:
