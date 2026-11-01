@@ -1,0 +1,211 @@
+name: Pack CRX
+
+# 推送到 main、或推送/更新任意 tag 时，把 extension/ 目录打成带签名的 CRX3 安装包和 ZIP，
+# 产物挂在本次 Actions run 的 Artifacts 里（默认保留 30 天）。
+#
+# 打 tag 时会额外校验 tag 名与 manifest 版本是否一致（v0.5.0 / 0.5.0 都认），
+# 不一致直接失败，避免打出「版本对不上号」的包。
+#
+# 签名密钥（可选但强烈建议）：
+#   仓库 Settings → Secrets and variables → Actions → New repository secret
+#   Name: CRX_PRIVATE_KEY
+#   Value: 本地 `openssl genrsa -out key.pem 2048` 生成后，`base64 -i key.pem` 的整段输出
+# 配了它，扩展 ID 才固定；没配则每次跑用临时密钥，ID 每次都不一样（仅供临时试用）。
+# key.pem 千万不要提交到仓库（.gitignore 已排除 *.pem）。
+
+on:
+  push:
+    branches: [main]
+    tags: ['*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pack-crx-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pack:
+    name: Build CRX
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22' # crx3@2 要求 node >= 22
+
+      - name: Read manifest version
+        id: meta
+        run: |
+          node -e '
+            const fs = require("fs");
+            const m = JSON.parse(fs.readFileSync("extension/manifest.json", "utf8"));
+            if (m.manifest_version !== 3) throw new Error("manifest_version 必须是 3");
+            if (!/^(\d+\.){0,3}\d+$/.test(m.version)) throw new Error("版本号不合法: " + m.version);
+            for (const p of m.version.split(".")) if (+p > 65535) throw new Error("版本号每段不能超过 65535");
+            console.log("version=" + m.version);
+            console.log("name=" + m.name);
+          ' >> "$GITHUB_OUTPUT"
+
+      - name: Verify tag matches manifest
+        if: github.ref_type == 'tag'
+        env:
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          set -euo pipefail
+          NORMALIZED="${TAG#v}"
+          if printf '%s' "$NORMALIZED" | grep -Eq '^[0-9]+(\.[0-9]+){0,3}$'; then
+            if [ "$NORMALIZED" != "$VERSION" ]; then
+              echo "::error title=版本不一致::tag ${TAG} 对应 ${NORMALIZED}，但 manifest.json 里是 ${VERSION}"
+              exit 1
+            fi
+            echo "tag $TAG 与 manifest 版本 $VERSION 一致"
+          else
+            echo "::notice title=跳过版本校验::tag $TAG 不是版本号形式，跳过一致性校验"
+          fi
+
+      - name: Validate extension
+        run: |
+          set -euo pipefail
+          for f in manifest.json background.js content.js content.css popup.html popup.js options.html options.js; do
+            [ -f "extension/$f" ] || { echo "::error::缺少 extension/$f"; exit 1; }
+          done
+          # 语法检查：复制成 .mjs 让 Node 按 ES module 解析（lib/*.js 是 module，直接 --check 会被当 CJS 误报）
+          while IFS= read -r f; do
+            cp "$f" /tmp/check.mjs
+            node --check /tmp/check.mjs || { echo "::error::语法错误: $f"; exit 1; }
+          done < <(find extension -name '*.js')
+          # 清掉不该进包的杂物
+          find extension -name '.DS_Store' -delete
+          find extension -name '*.pem' -delete
+          echo "extension/ 校验通过"
+
+      - name: Prepare signing key
+        id: key
+        env:
+          CRX_PRIVATE_KEY: ${{ secrets.CRX_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -n "${CRX_PRIVATE_KEY:-}" ]; then
+            node -e '
+              const fs = require("fs");
+              fs.writeFileSync("key.pem", Buffer.from(process.env.CRX_PRIVATE_KEY, "base64"), { mode: 0o600 });
+            '
+            echo "source=secret" >> "$GITHUB_OUTPUT"
+          else
+            openssl genrsa -out key.pem 2048 2>/dev/null
+            chmod 600 key.pem
+            echo "source=generated" >> "$GITHUB_OUTPUT"
+            echo "::warning title=未配置签名密钥::仓库 Secrets 里没有 CRX_PRIVATE_KEY，本次用临时密钥签名，扩展 ID 每次运行都会变。"
+          fi
+          # secret 贴错格式（例如贴了 PEM 原文而不是 base64）时给出可读的报错
+          if ! openssl rsa -in key.pem -check -noout >/dev/null 2>&1; then
+            echo "::error title=密钥不可用::CRX_PRIVATE_KEY 解出来不是有效的 RSA 私钥，请确认存的是 PEM 文件的 base64（base64 -i key.pem 的输出），而不是 PEM 原文。"
+            exit 1
+          fi
+          # 扩展 ID = sha256(DER 公钥) 前 16 字节，每个十六进制位 0-f 映射到 a-p
+          ID=$(node -e '
+            const crypto = require("crypto");
+            const der = require("child_process").execFileSync("openssl", ["rsa", "-in", "key.pem", "-pubout", "-outform", "DER"], { stdio: ["ignore", "pipe", "ignore"] });
+            const hex = crypto.createHash("sha256").update(der).digest("hex").slice(0, 32);
+            console.log(hex.replace(/[0-9a-f]/g, ch => String.fromCharCode(97 + parseInt(ch, 16))));
+          ')
+          echo "ext_id=$ID" >> "$GITHUB_OUTPUT"
+          echo "扩展 ID: $ID"
+
+      - name: Pack CRX and ZIP
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+          EXPECT: ${{ steps.key.outputs.ext_id }}
+        run: |
+          set -euo pipefail
+          BASE="open-translate-${VERSION}"
+          mkdir -p dist
+          npx --yes crx3@2.0.0 -p key.pem -o "dist/$BASE.crx" -z "dist/$BASE.zip" extension
+
+          # 自检：魔数 / 头部长度 / crx_id 是否与密钥推导出的扩展 ID 一致 / 内嵌 zip 是否完好
+          BASE="$BASE" node -e '
+            const fs = require("fs");
+            const b = fs.readFileSync("dist/" + process.env.BASE + ".crx");
+            if (b.subarray(0, 4).toString("latin1") !== "Cr24") throw new Error("不是 CRX 魔数");
+            if (b.readUInt32LE(4) !== 3) throw new Error("不是 CRX3");
+            const hlen = b.readUInt32LE(8);
+            const zip = b.subarray(12 + hlen);
+            if (zip.subarray(0, 2).toString("latin1") !== "PK") throw new Error("内嵌 zip 损坏");
+            // 从 protobuf 头部里取出 signed_header_data.crx_id 比对
+            const readVarint = (buf, p) => { let r = 0, s = 0, x; do { x = buf[p++]; r += (x & 0x7f) * 2 ** s; s += 7; } while (x & 0x80); return [r, p]; };
+            const header = b.subarray(12, 12 + hlen);
+            let p = 0, shd = null;
+            while (p < header.length) {
+              let tag; [tag, p] = readVarint(header, p);
+              let len; [len, p] = readVarint(header, p);
+              if (tag >> 3 === 10000) shd = header.subarray(p, p + len);
+              p += len;
+            }
+            let q = 0, id = null;
+            while (q < shd.length) {
+              let tag; [tag, q] = readVarint(shd, q);
+              let len; [len, q] = readVarint(shd, q);
+              if (tag >> 3 === 1) id = shd.subarray(q, q + len);
+              q += len;
+            }
+            const got = id.toString("hex").replace(/[0-9a-f]/g, ch => String.fromCharCode(97 + parseInt(ch, 16)));
+            if (got !== process.env.EXPECT) throw new Error("扩展 ID 不匹配: " + got + " != " + process.env.EXPECT);
+            console.log("CRX3 自检通过，扩展 ID " + got + "，载荷 " + zip.length + " 字节");
+          '
+
+          ( cd dist && sha256sum *.crx *.zip | tee SHA256SUMS.txt )
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: open-translate-${{ steps.meta.outputs.version }}-crx
+          path: dist/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Summary
+        env:
+          NAME: ${{ steps.meta.outputs.name }}
+          VERSION: ${{ steps.meta.outputs.version }}
+          EXT_ID: ${{ steps.key.outputs.ext_id }}
+          KEY_SOURCE: ${{ steps.key.outputs.source }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          COMMIT: ${{ github.sha }}
+        run: |
+          # 所有值都走 env：${{ }} 是在交给 shell 之前做文本替换的，直接内联进脚本时，
+          # 值里的反引号 / $() 会被 shell 当成命令执行（tag 名就允许带反引号）。
+          if [ "$KEY_SOURCE" = "secret" ]; then
+            KEY_NOTE="仓库 Secret CRX_PRIVATE_KEY"
+          else
+            KEY_NOTE="**临时生成**（扩展 ID 每次都会变，建议配置 Secret）"
+          fi
+          {
+            echo "### ${NAME} v${VERSION}"
+            echo ""
+            echo "| 项目 | 值 |"
+            echo "| --- | --- |"
+            echo "| 版本 | \`${VERSION}\` |"
+            echo "| 扩展 ID | \`${EXT_ID}\` |"
+            echo "| 签名密钥 | ${KEY_NOTE} |"
+            echo "| 触发 | ${REF_TYPE} ${REF_NAME} |"
+            echo "| 提交 | \`${COMMIT}\` |"
+            echo ""
+            echo "产物：\`.crx\`（签名安装包）、\`.zip\`（开发者模式加载解压 / 上架用）、\`SHA256SUMS.txt\`。Chrome 对非商店来源的 .crx 有策略限制，装不上时解压 .zip 用「加载已解压的扩展程序」。"
+            echo ""
+            echo '```'
+            cat dist/SHA256SUMS.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Remove private key
+        if: always()
+        run: rm -f key.pem

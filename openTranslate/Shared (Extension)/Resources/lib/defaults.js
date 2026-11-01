@@ -2,7 +2,7 @@ import { normalizeGlossarySettings } from './glossary.js';
 
 // Shared settings model. Imported by the service worker, options page and popup.
 
-export const APP_VERSION = '0.4.0';
+export const APP_VERSION = '0.5.0';
 
 /** Accent shipped before the switch to Apple system blue. See normalizeSettings. */
 const LEGACY_ACCENT = '#6d5dfc';

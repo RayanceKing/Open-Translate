@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Open Translate · Bilingual Web Reader
 // @namespace    https://github.com/open-translate
-// @version      0.4.0
+// @version      0.5.0
 // @description  In-place bilingual translation with switchable engines, AI providers and style presets. Option+T to toggle.
 // @author       Open Translate contributors
 // @license      AGPLv3
@@ -2466,7 +2466,7 @@ function protectGlossary(texts, entries) {
       <div class="dialog" role="dialog" aria-modal="true">
         <div class="head">
           <h2>Open Translate 设置</h2>
-          <span class="ver">v0.4.0</span>
+          <span class="ver">v0.5.0</span>
           <button class="close" type="button" aria-label="关闭">✕</button>
         </div>
         <div class="tabs">
