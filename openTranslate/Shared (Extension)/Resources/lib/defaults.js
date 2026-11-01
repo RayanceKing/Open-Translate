@@ -97,6 +97,7 @@ export const DEFAULT_SETTINGS = {
     deepl: { key: '', pro: false },
     microsoft: { useKey: false, key: '', region: 'global' },
     libre: { url: '', key: '' },
+    apple: {},
     openai: { baseUrl: 'https://api.openai.com/v1', apiKey: '', model: 'gpt-4o-mini' },
     deepseek: { baseUrl: 'https://api.deepseek.com/v1', apiKey: '', model: 'deepseek-chat' },
     gemini: { apiKey: '', model: 'gemini-2.0-flash' },

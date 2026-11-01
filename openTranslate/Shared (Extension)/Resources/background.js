@@ -5,6 +5,21 @@ import { AI_ENGINES } from './lib/defaults.js';
 import { cacheKey, readCache, writeCache, clearCache, cacheStats } from './lib/cache.js';
 import { resolveGlossary, glossarySalt, protectGlossary } from './lib/glossary.js';
 
+function protectLayout(text) {
+  const markers = [];
+  const protectedText = String(text).replace(/\r\n|\r|\n|\t/g, whitespace => {
+    const index = markers.length;
+    markers.push(whitespace);
+    return `\uE000OT_WS_${index}\uE001`;
+  });
+  return {
+    text: protectedText,
+    restore(value) {
+      return String(value || '').replace(/\uE000OT_WS_(\d+)\uE001/g, (_, index) => markers[Number(index)] || '');
+    }
+  };
+}
+
 /** Anything that changes the meaning of a translation without changing the text. */
 function promptSalt(settings, engine) {
   if (!AI_ENGINES.includes(engine)) return '';
@@ -37,8 +52,10 @@ async function handleTranslate({ texts = [], engine, source, target }, snapshot,
   });
 
   if (pending.length) {
-    const guard = settings.privacy.maskSensitive ? maskAll(pending.map(item => item.text)) : null;
-    const masked = guard ? guard.safe : pending.map(item => item.text);
+    const layouts = pending.map(item => protectLayout(item.text));
+    const original = layouts.map(layout => layout.text);
+    const guard = settings.privacy.maskSensitive ? maskAll(original) : null;
+    const masked = guard ? guard.safe : original;
     const protection = !isAI && settings.glossary?.enabled && settings.glossary?.machineTranslation
       ? protectGlossary(masked, entries) : null;
     const payload = protection ? protection.safe : masked;
@@ -60,7 +77,7 @@ async function handleTranslate({ texts = [], engine, source, target }, snapshot,
           value = retry[0];
         }
       }
-      const text = guard ? guard.restore(value) : value;
+      const text = layouts[index].restore(guard ? guard.restore(value) : value);
       results[pending[index].index] = text;
       if (valid && text) fresh.push([pending[index].key, text]);
     }

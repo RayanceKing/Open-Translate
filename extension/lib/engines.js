@@ -257,6 +257,61 @@ const libre = {
   }
 };
 
+// Apple's on-device system translation. The actual work runs in the Safari Web
+// Extension's native app extension (SafariWebExtensionHandler) through
+// runtime.sendNativeMessage — Safari routes the message to the containing app
+// regardless of the first argument and the JS side only runs inside the
+// extension's background page, which is allowed to call native messaging.
+const apple = {
+  id: 'apple',
+  async translate({ texts, source = 'auto', target }) {
+    const runtimes = [
+      typeof browser !== 'undefined' ? browser.runtime : null,
+      typeof chrome !== 'undefined' ? chrome.runtime : null
+    ].filter(candidate => typeof candidate?.sendNativeMessage === 'function');
+    const runtime = runtimes[0];
+    const usesPromiseApi = typeof browser !== 'undefined' && browser.runtime === runtime;
+    if (typeof runtime?.sendNativeMessage !== 'function') {
+      throw new Error('系统翻译仅支持 iOS / macOS 上的 Safari 扩展');
+    }
+    const reply = await new Promise((resolve, reject) => {
+      let settled = false;
+      const timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        reject(new Error('系统翻译响应超时，请确认设备已下载对应语言包'));
+      }, 25000);
+      try {
+        const application = 'com.stuwang.openTranslate.Extension';
+        const complete = response => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          const lastError = runtime.lastError;
+          if (lastError) reject(new Error(lastError.message || '调用系统翻译失败'));
+          else resolve(response);
+        };
+        const result = usesPromiseApi
+          ? runtime.sendNativeMessage(application, { type: 'translate', texts, source, target })
+          : runtime.sendNativeMessage(application, { type: 'translate', texts, source, target }, complete);
+        if (result && typeof result.then === 'function') {
+          result.then(complete, reject);
+        }
+      } catch (error) {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        reject(error);
+      }
+    });
+    if (reply?.error) throw new Error(reply.error);
+    if (!reply || !Array.isArray(reply.texts) || reply.texts.length !== texts.length) {
+      throw new Error('系统翻译返回了意外的数据格式');
+    }
+    return reply.texts;
+  }
+};
+
 // ---------------------------------------------------------------- AI engines
 
 function buildPrompt({ texts, source, target, config }) {
@@ -403,7 +458,7 @@ const claude = {
 
 // ---------------------------------------------------------------- registry
 
-export const PROVIDERS = { google, mymemory, deepl, microsoft, libre, openai, deepseek, gemini, claude, custom };
+export const PROVIDERS = { google, mymemory, deepl, microsoft, libre, apple, openai, deepseek, gemini, claude, custom };
 
 export function hasProvider(id) {
   return Boolean(PROVIDERS[id]);

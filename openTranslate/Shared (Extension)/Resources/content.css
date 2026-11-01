@@ -2,12 +2,14 @@
    content script writes onto <html>, so settings changes apply instantly. */
 
 .ot-translation {
-  display: inline-block;
+  display: var(--ot-display, inline-block);
   max-width: 100%;
   font-family: inherit;
   font-size: calc(1em * var(--ot-fs, 1));
   font-weight: var(--ot-fw, 400);
   line-height: var(--ot-lh, 1.7);
+  white-space: pre-wrap;
+  tab-size: 4;
   letter-spacing: normal;
   text-align: inherit;
   text-indent: 0;
