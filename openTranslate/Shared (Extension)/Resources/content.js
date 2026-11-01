@@ -1,6 +1,17 @@
 (() => {
   'use strict';
 
+  const captchaContext = (() => {
+    const value = `${location.href} ${location.hostname}`.toLowerCase();
+    if (/(recaptcha|hcaptcha|challenges\.cloudflare\.com|turnstile)/.test(value)) return true;
+    try {
+      return /(recaptcha|hcaptcha|challenges\.cloudflare\.com|turnstile)/.test(String(window.frameElement?.src || '').toLowerCase());
+    } catch {
+      return false;
+    }
+  })();
+  if (captchaContext) return;
+
   const MARK = 'data-open-translate';
   const SKIP = 'script,style,noscript,textarea,input,select,option,button,code,pre,kbd,samp,svg,canvas,[contenteditable="true"],[data-open-translate]';
   const BLOCK_SELECTOR = 'p,li,h1,h2,h3,h4,h5,h6,blockquote,figcaption,td,th,dd,dt';
