@@ -1,6 +1,7 @@
 import { LANGUAGES } from './lib/defaults.js';
 import { ENGINE_CATALOG } from './lib/catalog.js';
 import { loadSettings, saveSettings } from './lib/store.js';
+import { applyInterfaceLanguage } from './lib/i18n.js';
 
 const $ = selector => document.querySelector(selector);
 
@@ -33,6 +34,7 @@ function render() {
   document.querySelectorAll('#modes button').forEach(button => {
     button.classList.toggle('is-selected', button.dataset.mode === settings.displayMode);
   });
+  applyInterfaceLanguage(settings.interfaceLanguage);
 }
 
 function bind() {

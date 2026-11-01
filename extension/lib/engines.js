@@ -60,6 +60,10 @@ const LIBRE_LANG = { 'zh-CN': 'zh', 'zh-TW': 'zt' };
 const deeplLang = code => DEEPL_LANG[code] || String(code).toUpperCase();
 const msLang = code => MS_LANG[code] || code;
 const libreLang = code => LIBRE_LANG[code] || String(code).split('-')[0];
+const mymemoryLang = code => {
+  const value = String(code || '').trim();
+  return !value || value.toLowerCase() === 'auto' ? 'en' : value;
+};
 
 // ---------------------------------------------------------------- free engines
 
@@ -85,13 +89,16 @@ const google = {
 
 const mymemory = {
   id: 'mymemory',
-  async translate({ texts, target }) {
+  async translate({ texts, source, target }) {
+    const sourceLang = mymemoryLang(source);
     const output = [];
     for (const text of texts) {
       const url =
         'https://api.mymemory.translated.net/get?q=' +
         encodeURIComponent(text.slice(0, 500)) +
-        '&langpair=auto%7C' +
+        '&langpair=' +
+        encodeURIComponent(sourceLang) +
+        '%7C' +
         encodeURIComponent(target);
       const data = await http(url);
       if (data?.responseStatus !== 200) throw new Error(data?.responseDetails || 'MyMemory 服务不可用');

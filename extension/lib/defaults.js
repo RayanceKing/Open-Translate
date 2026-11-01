@@ -2,7 +2,21 @@ import { normalizeGlossarySettings } from './glossary.js';
 
 // Shared settings model. Imported by the service worker, options page and popup.
 
-export const APP_VERSION = '0.5.0';
+export const APP_VERSION = '1.0.0';
+
+export const deviceLanguage = () => {
+  const language = String(globalThis.navigator?.language || '').toLowerCase();
+  if (language.startsWith('zh-tw') || language.startsWith('zh-hk')) return 'zh-TW';
+  if (language.startsWith('zh')) return 'zh-CN';
+  if (language.startsWith('ja')) return 'ja';
+  if (language.startsWith('ko')) return 'ko';
+  if (language.startsWith('fr')) return 'fr';
+  if (language.startsWith('de')) return 'de';
+  if (language.startsWith('es')) return 'es';
+  return 'en';
+};
+
+export const interfaceLanguage = () => deviceLanguage() === 'en' ? 'en' : 'zh-CN';
 
 /** Accent shipped before the switch to Apple system blue. See normalizeSettings. */
 const LEGACY_ACCENT = '#6d5dfc';
@@ -66,7 +80,8 @@ export const DEFAULT_SETTINGS = {
   version: APP_VERSION,
   engine: 'google',
   sourceLanguage: 'auto',
-  targetLanguage: 'zh-CN',
+  targetLanguage: deviceLanguage(),
+  interfaceLanguage: interfaceLanguage(),
   displayMode: 'bilingual',
   autoTranslate: false,
   batchSize: 4,

@@ -1,6 +1,17 @@
 (() => {
   'use strict';
 
+  const captchaContext = (() => {
+    const value = `${location.href} ${location.hostname}`.toLowerCase();
+    if (/(recaptcha|hcaptcha|challenges\.cloudflare\.com|turnstile)/.test(value)) return true;
+    try {
+      return /(recaptcha|hcaptcha|challenges\.cloudflare\.com|turnstile)/.test(String(window.frameElement?.src || '').toLowerCase());
+    } catch {
+      return false;
+    }
+  })();
+  if (captchaContext) return;
+
   const MARK = 'data-open-translate';
   const SKIP = 'script,style,noscript,textarea,input,select,option,button,code,pre,kbd,samp,svg,canvas,[contenteditable="true"],[data-open-translate]';
   const BLOCK_SELECTOR = 'p,li,h1,h2,h3,h4,h5,h6,blockquote,figcaption,td,th,dd,dt';
@@ -821,8 +832,13 @@
 
   async function ytRenderText(text) {
     const generation = subtitleGeneration;
-    const layer = ensureYtLayer();
-    if (!text) { layer.classList.remove('is-visible'); layer.textContent = ''; return; }
+    document.querySelectorAll('.ot-yt-sub').forEach(node => node.remove());
+    const container = ytCaptionContainer();
+    const segment = container?.querySelector(YT_CAPTION_SEGMENT);
+    const windowNode = segment?.closest('.caption-window') || container?.querySelector('.caption-window');
+    if (!container || !windowNode) return;
+    windowNode.querySelectorAll('.ot-yt-inline').forEach(node => node.remove());
+    if (!text) return;
     let translation = ytTransCache.get(text);
     if (translation === undefined) {
       try {
@@ -834,40 +850,48 @@
       ytTransCache.set(text, translation);
     }
     if (generation !== subtitleGeneration || text !== ytCurrentText()) return;
-    layer.textContent = translation;
-    layer.classList.toggle('is-visible', Boolean(translation));
-    positionYtLayer(layer);
+    if (!translation) return;
+    const line = document.createElement('span');
+    line.className = 'ot-yt-inline';
+    line.textContent = translation;
+    line.style.cssText = 'display:block;margin-top:2px;color:#fff;background:rgba(8,8,8,.75);font:inherit;font-size:inherit;font-family:inherit;font-weight:inherit;line-height:inherit;text-shadow:0 1px 3px rgba(0,0,0,.85);white-space:pre-wrap;';
+    const source = windowNode.querySelector('.captions-text');
+    (source || windowNode).append(line);
   }
 
   let ytObserver = null;
+  let ytPoller = 0;
   let ytLastText = '';
+  let ytRequest = 0;
 
   function startYouTubeHook() {
-    if (!enableYouTubeCaptions()) return false;
-    const container = ytCaptionContainer();
-    if (!container) return false;
-    ytLastText = '';
-    let scheduled = false;
-    const tick = () => {
-      if (scheduled) return;
-      scheduled = true;
-      setTimeout(async () => {
-        scheduled = false;
-        const text = ytCurrentText();
-        if (text === ytLastText) return;
-        ytLastText = text;
-        await ytRenderText(text);
-      }, 0);
+    if (!document.body) return false;
+    stopYouTubeHook();
+    const request = ++ytRequest;
+    const process = async () => {
+      if (request !== ytRequest || !SUB_STATE.on || SUB_STATE.mode !== 'ythook') return;
+      const container = ytCaptionContainer();
+      if (!container) {
+        enableYouTubeCaptions();
+        return;
+      }
+      const text = ytCurrentText();
+      if (!text || text === ytLastText) return;
+      ytLastText = text;
+      await ytRenderText(text);
     };
-    ytObserver = new MutationObserver(tick);
-    ytObserver.observe(container, { childList: true, subtree: true, characterData: true });
-    tick();
+    ytObserver = new MutationObserver(process);
+    ytObserver.observe(document.body, { childList: true, subtree: true, characterData: true });
+    ytPoller = window.setInterval(process, 150);
+    process();
     return true;
   }
 
   function stopYouTubeHook() {
+    ytRequest++;
     if (ytObserver) { ytObserver.disconnect(); ytObserver = null; }
-    document.querySelector('.ot-yt-sub')?.remove();
+    if (ytPoller) { clearInterval(ytPoller); ytPoller = 0; }
+    document.querySelectorAll('.ot-yt-sub, .ot-yt-inline').forEach(node => node.remove());
     ytLastText = '';
   }
 
@@ -1231,6 +1255,7 @@
         SUB_STATE.on = true;
         SUB_STATE.mode = 'ythook';
         document.documentElement.classList.add('ot-sub-on', 'ot-sub-ythook');
+        if (manual) toast('双语字幕已开启');
         return;
       }
       // hook failed; fall through to injected-track mode below
@@ -1277,6 +1302,7 @@
         stopSubtitles();
         return;
       }
+      if (manual) toast('双语字幕已开启');
     } catch (error) {
       toast(`字幕加载失败：${error.message}`);
       stopSubtitles();
@@ -1849,19 +1875,4 @@
     if (document.body) renderDock();
     if (settings.autoTranslate || settings.siteRules.alwaysTranslate.some(matchesSite)) sleep(400).then(start);
   });
-
-  // Cross-device iCloud sync: pull the latest settings via the background →
-  // native handler and adopt them when newer. Cloud copies are secret-stripped,
-  // so no API key ever travels to the content script. Writing locally triggers
-  // the storage.onChanged reload above.
-  try {
-    chrome.runtime.sendMessage({ type: 'native', message: { type: 'settings', action: 'get' } }, response => {
-      const cloud = response && response.settings;
-      if (!cloud || typeof cloud !== 'object') return;
-      if ((cloud.syncedAt || 0) <= (settings.syncedAt || 0)) return;
-      try {
-        chrome.storage.local.set({ settings: cloud, targetLanguage: cloud.targetLanguage || settings.targetLanguage });
-      } catch (_) { /* ignore */ }
-    });
-  } catch (_) { /* ignore */ }
 })();
