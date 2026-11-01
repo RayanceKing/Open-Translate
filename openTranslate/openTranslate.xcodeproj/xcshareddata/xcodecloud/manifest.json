@@ -1,0 +1,9 @@
+{
+  "id" : "6fdc5dd7-6366-4dc0-a3a3-531d63695277",
+  "targets" : [
+    {
+      "id" : "e1042f5a-70b0-4b3a-b550-a9cf35577203",
+      "name" : "openTranslate (iOS)"
+    }
+  ]
+}
