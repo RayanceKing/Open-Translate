@@ -238,7 +238,10 @@ function protectGlossary(texts, entries) {
   const LAZY_MARGIN_PX = 400;
   const SITE_RULES = {
     'github.com': ['article.markdown-body', '.js-comment-body', '.markdown-body'],
-    'reddit.com': ['[data-testid="post-content"]', '[id^="t3_"]', 'shreddit-post'],
+    'reddit.com': [
+      '[data-testid="post-content"]', '[id^="t3_"]', 'shreddit-post',
+      'shreddit-comment', '[data-testid="comment"]'
+    ],
     'news.ycombinator.com': ['.titleline', '.commtext'],
     'medium.com': ['article'],
     'substack.com': ['article', '.post-content']
