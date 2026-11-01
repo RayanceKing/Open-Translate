@@ -979,6 +979,7 @@ function protectGlossary(texts, entries) {
     html.ot-sub-on:not(.ot-sub-ythook) .ytp-caption-window-container, html.ot-sub-on:not(.ot-sub-ythook) .ytp-caption-window-container * { display: none !important; }
     .ot-yt-sub { position: fixed; z-index: 2147483000; padding: 2px 10px; border-radius: 6px; color: #fff; text-align: center; text-shadow: 0 1px 3px rgba(0,0,0,.85); background: rgba(0,0,0,.55); pointer-events: none; opacity: 0; transition: opacity .14s ease; box-sizing: border-box; max-width: 92vw; white-space: pre-wrap; overflow-wrap: anywhere; }
     .ot-yt-sub.is-visible { opacity: 1; }
+    .ot-yt-inline { display: block; margin-top: 2px; color: #fff; background: rgba(8,8,8,.75); text-shadow: 0 1px 3px rgba(0,0,0,.85); white-space: pre-wrap; }
   `;
 
   const SUB = {
@@ -1157,8 +1158,7 @@ function protectGlossary(texts, entries) {
     SUB.pending.clear();
     SUB.cues.forEach(cue => { cue.translation = null; cue.attempts = 0; });
     SUB.index = -1;
-    const layer = document.querySelector('.ot-yt-sub');
-    if (layer) { layer.textContent = ''; layer.classList.remove('is-visible'); }
+    document.querySelectorAll('.ot-yt-inline, .ot-yt-sub').forEach(node => node.remove());
     if (SUB.on && SUB.mode === 'ythook') ytRenderText(ytCurrentText());
     if (active) toast('术语设置已更改，请还原后重新翻译页面');
   }
@@ -1215,8 +1215,13 @@ function protectGlossary(texts, entries) {
 
   async function ytRenderText(text) {
     const generation = glossaryGeneration;
-    const layer = ensureYtLayer();
-    if (!text) { layer.classList.remove('is-visible'); layer.textContent = ''; return; }
+    document.querySelectorAll('.ot-yt-sub').forEach(node => node.remove());
+    const container = ytCaptionContainer();
+    const segment = container?.querySelector(YT_CAPTION_SEGMENT);
+    const windowNode = segment?.closest('.caption-window') || container?.querySelector('.caption-window');
+    if (!container || !windowNode) return;
+    windowNode.querySelectorAll('.ot-yt-inline').forEach(node => node.remove());
+    if (!text) return;
     let translation = ytTransCache.get(text);
     if (translation === undefined) {
       try {
@@ -1228,9 +1233,13 @@ function protectGlossary(texts, entries) {
       ytTransCache.set(text, translation);
     }
     if (generation !== glossaryGeneration || text !== ytCurrentText()) return;
-    layer.textContent = translation;
-    layer.classList.toggle('is-visible', Boolean(translation));
-    positionYtLayer(layer);
+    if (!translation) return;
+    const line = document.createElement('span');
+    line.className = 'ot-yt-inline';
+    line.textContent = translation;
+    line.style.cssText = 'display:block;margin-top:2px;color:#fff;background:rgba(8,8,8,.75);font:inherit;font-size:inherit;font-family:inherit;font-weight:inherit;line-height:inherit;text-shadow:0 1px 3px rgba(0,0,0,.85);white-space:pre-wrap;';
+    const source = windowNode.querySelector('.captions-text');
+    (source || windowNode).append(line);
   }
 
   let ytObserver = null;
@@ -1269,7 +1278,7 @@ function protectGlossary(texts, entries) {
     ytRequest++;
     if (ytObserver) { ytObserver.disconnect(); ytObserver = null; }
     if (ytPoller) { clearInterval(ytPoller); ytPoller = 0; }
-    document.querySelector('.ot-yt-sub')?.remove();
+    document.querySelectorAll('.ot-yt-sub, .ot-yt-inline').forEach(node => node.remove());
     ytLastText = '';
   }
 
@@ -1610,6 +1619,7 @@ function protectGlossary(texts, entries) {
         SUB.on = true;
         SUB.mode = 'ythook';
         document.documentElement.classList.add('ot-sub-on', 'ot-sub-ythook');
+        if (manual) toast('双语字幕已开启');
         return;
       }
       // hook failed; fall through to injected-track mode below
@@ -1662,6 +1672,7 @@ function protectGlossary(texts, entries) {
       // cue keeps advancing off `video.currentTime` even if `cuechange` stalls.
       bindSubVideo(video);
       if (!video.paused) startSubTick();
+      if (manual) toast('双语字幕已开启');
     } catch (error) {
       toast(`字幕加载失败：${error.message}`);
       stopSubtitles();

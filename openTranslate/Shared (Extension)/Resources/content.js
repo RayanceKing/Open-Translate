@@ -832,8 +832,13 @@
 
   async function ytRenderText(text) {
     const generation = subtitleGeneration;
-    const layer = ensureYtLayer();
-    if (!text) { layer.classList.remove('is-visible'); layer.textContent = ''; return; }
+    document.querySelectorAll('.ot-yt-sub').forEach(node => node.remove());
+    const container = ytCaptionContainer();
+    const segment = container?.querySelector(YT_CAPTION_SEGMENT);
+    const windowNode = segment?.closest('.caption-window') || container?.querySelector('.caption-window');
+    if (!container || !windowNode) return;
+    windowNode.querySelectorAll('.ot-yt-inline').forEach(node => node.remove());
+    if (!text) return;
     let translation = ytTransCache.get(text);
     if (translation === undefined) {
       try {
@@ -845,9 +850,13 @@
       ytTransCache.set(text, translation);
     }
     if (generation !== subtitleGeneration || text !== ytCurrentText()) return;
-    layer.textContent = translation;
-    layer.classList.toggle('is-visible', Boolean(translation));
-    positionYtLayer(layer);
+    if (!translation) return;
+    const line = document.createElement('span');
+    line.className = 'ot-yt-inline';
+    line.textContent = translation;
+    line.style.cssText = 'display:block;margin-top:2px;color:#fff;background:rgba(8,8,8,.75);font:inherit;font-size:inherit;font-family:inherit;font-weight:inherit;line-height:inherit;text-shadow:0 1px 3px rgba(0,0,0,.85);white-space:pre-wrap;';
+    const source = windowNode.querySelector('.captions-text');
+    (source || windowNode).append(line);
   }
 
   let ytObserver = null;
@@ -882,7 +891,7 @@
     ytRequest++;
     if (ytObserver) { ytObserver.disconnect(); ytObserver = null; }
     if (ytPoller) { clearInterval(ytPoller); ytPoller = 0; }
-    document.querySelector('.ot-yt-sub')?.remove();
+    document.querySelectorAll('.ot-yt-sub, .ot-yt-inline').forEach(node => node.remove());
     ytLastText = '';
   }
 
@@ -1246,6 +1255,7 @@
         SUB_STATE.on = true;
         SUB_STATE.mode = 'ythook';
         document.documentElement.classList.add('ot-sub-on', 'ot-sub-ythook');
+        if (manual) toast('双语字幕已开启');
         return;
       }
       // hook failed; fall through to injected-track mode below
@@ -1292,6 +1302,7 @@
         stopSubtitles();
         return;
       }
+      if (manual) toast('双语字幕已开启');
     } catch (error) {
       toast(`字幕加载失败：${error.message}`);
       stopSubtitles();

@@ -355,6 +355,15 @@ html.ot-sub-on:not(.ot-sub-ythook) .ytp-caption-window-container * {
   opacity: 1;
 }
 
+.ot-yt-inline {
+  display: block;
+  margin-top: 2px;
+  color: #fff;
+  background: rgba(8, 8, 8, 0.75);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.85);
+  white-space: pre-wrap;
+}
+
 /* ---------- toast ---------- */
 
 .ot-toast {
