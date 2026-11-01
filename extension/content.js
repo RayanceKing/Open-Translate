@@ -851,33 +851,37 @@
   }
 
   let ytObserver = null;
+  let ytPoller = 0;
   let ytLastText = '';
+  let ytRequest = 0;
 
   function startYouTubeHook() {
-    if (!enableYouTubeCaptions()) return false;
-    const container = ytCaptionContainer();
-    if (!container) return false;
-    ytLastText = '';
-    let scheduled = false;
-    const tick = () => {
-      if (scheduled) return;
-      scheduled = true;
-      setTimeout(async () => {
-        scheduled = false;
-        const text = ytCurrentText();
-        if (text === ytLastText) return;
-        ytLastText = text;
-        await ytRenderText(text);
-      }, 0);
+    if (!document.body) return false;
+    stopYouTubeHook();
+    const request = ++ytRequest;
+    const process = async () => {
+      if (request !== ytRequest || !SUB_STATE.on || SUB_STATE.mode !== 'ythook') return;
+      const container = ytCaptionContainer();
+      if (!container) {
+        enableYouTubeCaptions();
+        return;
+      }
+      const text = ytCurrentText();
+      if (!text || text === ytLastText) return;
+      ytLastText = text;
+      await ytRenderText(text);
     };
-    ytObserver = new MutationObserver(tick);
-    ytObserver.observe(container, { childList: true, subtree: true, characterData: true });
-    tick();
+    ytObserver = new MutationObserver(process);
+    ytObserver.observe(document.body, { childList: true, subtree: true, characterData: true });
+    ytPoller = window.setInterval(process, 150);
+    process();
     return true;
   }
 
   function stopYouTubeHook() {
+    ytRequest++;
     if (ytObserver) { ytObserver.disconnect(); ytObserver = null; }
+    if (ytPoller) { clearInterval(ytPoller); ytPoller = 0; }
     document.querySelector('.ot-yt-sub')?.remove();
     ytLastText = '';
   }
