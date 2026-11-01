@@ -10,8 +10,10 @@ import {
   SUBTITLE_MODES,
   VISION_ENGINES,
   normalizeSettings,
-  styleToVars
+  styleToVars,
+  interfaceLanguage
 } from './lib/defaults.js';
+import { applyInterfaceLanguage } from './lib/i18n.js';
 import { ENGINE_CATALOG, ENGINE_BY_ID } from './lib/catalog.js';
 import { loadSettings, saveSettings, getAllSecrets, setSecret } from './lib/store.js';
 import { GLOSSARY_SOURCE, GLOSSARY_LIBRARIES } from './lib/glossary-data.js';
@@ -708,6 +710,7 @@ function hydrate() {
 async function init() {
   try {
     settings = await loadSettings();
+    if (!settings.interfaceLanguage) settings.interfaceLanguage = interfaceLanguage();
     secretStatus = await getAllSecrets();
 
     // Migrate any plaintext keys left over from before Keychain storage: move
@@ -747,6 +750,13 @@ async function init() {
     if (versionLabel) versionLabel.textContent = `v${APP_VERSION}`;
     $('#about-version').textContent = `v${APP_VERSION}`;
     hydrate();
+    $('#interfaceLanguage').value = settings.interfaceLanguage;
+    $('#interfaceLanguage').addEventListener('change', async event => {
+      settings.interfaceLanguage = event.target.value;
+      settings = await saveSettings(settings);
+      applyInterfaceLanguage(settings.interfaceLanguage);
+    });
+    applyInterfaceLanguage(settings.interfaceLanguage);
   } catch (error) {
     console.error('Open Translate settings initialization failed', error);
     const list = $('#services-list');

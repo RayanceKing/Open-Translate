@@ -344,7 +344,18 @@ function protectGlossary(texts, entries) {
   const DEFAULTS = {
     engine: 'google',
     sourceLanguage: 'auto',
-    targetLanguage: 'zh-CN',
+    targetLanguage: (() => {
+      const language = String(navigator.language || '').toLowerCase();
+      if (language.startsWith('zh-tw') || language.startsWith('zh-hk')) return 'zh-TW';
+      if (language.startsWith('zh')) return 'zh-CN';
+      if (language.startsWith('ja')) return 'ja';
+      if (language.startsWith('ko')) return 'ko';
+      if (language.startsWith('fr')) return 'fr';
+      if (language.startsWith('de')) return 'de';
+      if (language.startsWith('es')) return 'es';
+      return 'en';
+    })(),
+    interfaceLanguage: String(navigator.language || '').toLowerCase().startsWith('en') ? 'en' : 'zh-CN',
     displayMode: 'bilingual',
     autoTranslate: false,
     batchSize: 4,
@@ -2499,6 +2510,10 @@ function protectGlossary(texts, entries) {
             <div class="field"><label>目标语言</label><select data-k="targetLanguage">${LANGUAGES.map(
               ([code, label]) => `<option value="${code}" ${code === settings.targetLanguage ? 'selected' : ''}>${label}</option>`
             ).join('')}</select></div>
+            <div class="field"><label>界面语言</label><select data-k="interfaceLanguage">
+              <option value="zh-CN" ${settings.interfaceLanguage === 'zh-CN' ? 'selected' : ''}>简体中文</option>
+              <option value="en" ${settings.interfaceLanguage === 'en' ? 'selected' : ''}>English</option>
+            </select></div>
             <div class="field"><label>显示模式</label><div class="seg"><span class="seg-glider" aria-hidden="true"></span>${[
               ['bilingual', '双语对照'], ['translation', '仅译文'], ['hover', '悬停显示']
             ].map(([id, name]) => `<button type="button" data-mode="${id}" class="${settings.displayMode === id ? 'active' : ''}">${name}</button>`).join('')}</div></div>
