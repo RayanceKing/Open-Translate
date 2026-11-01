@@ -2,10 +2,14 @@ function show(platform, enabled, useSettingsInsteadOfPreferences) {
     document.body.classList.add(`platform-${platform}`);
 
     if (useSettingsInsteadOfPreferences) {
-        document.getElementsByClassName('platform-mac state-on')[0].innerText = "openTranslate’s extension is currently on. You can turn it off in the Extensions section of Safari Settings.";
-        document.getElementsByClassName('platform-mac state-off')[0].innerText = "openTranslate’s extension is currently off. You can turn it on in the Extensions section of Safari Settings.";
-        document.getElementsByClassName('platform-mac state-unknown')[0].innerText = "You can turn on openTranslate’s extension in the Extensions section of Safari Settings.";
-        document.getElementsByClassName('platform-mac open-preferences')[0].innerText = "Quit and Open Safari Settings…";
+        const on = document.querySelector('.platform-mac.state-on');
+        const off = document.querySelector('.platform-mac.state-off');
+        const unknown = document.querySelector('.platform-mac.state-unknown');
+        const preferences = document.querySelector('.platform-mac.open-preferences');
+        if (on) on.innerText = "openTranslate’s extension is currently on. You can turn it off in the Extensions section of Safari Settings.";
+        if (off) off.innerText = "openTranslate’s extension is currently off. You can turn it on in the Extensions section of Safari Settings.";
+        if (unknown) unknown.innerText = "You can turn on openTranslate’s extension in the Extensions section of Safari Settings.";
+        if (preferences) preferences.innerText = "Quit and Open Safari Settings…";
     }
 
     if (typeof enabled === "boolean") {

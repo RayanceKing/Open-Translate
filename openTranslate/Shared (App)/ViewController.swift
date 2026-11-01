@@ -40,22 +40,7 @@ class ViewController: PlatformViewController, WKNavigationDelegate, WKScriptMess
 #if os(iOS)
         webView.evaluateJavaScript("show('ios')")
 #elseif os(macOS)
-        webView.evaluateJavaScript("show('mac')")
-
-        SFSafariExtensionManager.getStateOfSafariExtension(withIdentifier: extensionBundleIdentifier) { (state, error) in
-            guard let state = state, error == nil else {
-                // Insert code to inform the user that something went wrong.
-                return
-            }
-
-            DispatchQueue.main.async {
-                if #available(macOS 13, *) {
-                    webView.evaluateJavaScript("show('mac', \(state.isEnabled), true)")
-                } else {
-                    webView.evaluateJavaScript("show('mac', \(state.isEnabled), false)")
-                }
-            }
-        }
+        refreshExtensionState()
 #endif
     }
 
@@ -71,21 +56,28 @@ class ViewController: PlatformViewController, WKNavigationDelegate, WKScriptMess
         }
         UIApplication.shared.open(settingsURL)
 #elseif os(macOS)
-        guard action == "open-preferences" else {
-            return
-        }
-
-        SFSafariApplication.showPreferencesForExtension(withIdentifier: extensionBundleIdentifier) { error in
-            guard error == nil else {
-                // Insert code to inform the user that something went wrong.
-                return
-            }
-
-            DispatchQueue.main.async {
-                NSApp.terminate(self)
-            }
-        }
+        guard action == "open-preferences" else { return }
+        SFSafariApplication.showPreferencesForExtension(withIdentifier: extensionBundleIdentifier) { _ in }
 #endif
     }
+
+#if os(macOS)
+    private func refreshExtensionState() {
+        SFSafariExtensionManager.getStateOfSafariExtension(withIdentifier: extensionBundleIdentifier) { state, error in
+            guard error == nil, let state else { return }
+            DispatchQueue.main.async {
+                let usesSettings: Bool
+                if #available(macOS 13, *) {
+                    usesSettings = true
+                } else {
+                    usesSettings = false
+                }
+                self.webView.evaluateJavaScript(
+                    "show('mac', \(state.isEnabled), \(usesSettings))"
+                )
+            }
+        }
+    }
+#endif
 
 }
