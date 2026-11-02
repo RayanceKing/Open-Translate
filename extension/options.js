@@ -698,7 +698,7 @@ async function init() {
 
     const versionLabel = $('#version-label');
     if (versionLabel) versionLabel.textContent = `v${APP_VERSION}`;
-    $('#about-version').textContent = `v${APP_VERSION}`;
+    if ($('#about-version')) $('#about-version').textContent = `v${APP_VERSION}`;
     hydrate();
     $('#interfaceLanguage').value = settings.interfaceLanguage;
     $('#interfaceLanguage').addEventListener('change', async event => {

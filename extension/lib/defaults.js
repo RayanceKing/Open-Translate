@@ -78,7 +78,7 @@ export const DEFAULT_PROMPT = [
 
 export const DEFAULT_SETTINGS = {
   version: APP_VERSION,
-  engine: 'google',
+  engine: 'auto',
   sourceLanguage: 'auto',
   targetLanguage: deviceLanguage(),
   interfaceLanguage: interfaceLanguage(),
@@ -107,6 +107,7 @@ export const DEFAULT_SETTINGS = {
     marginBottom: 12
   },
   engines: {
+    auto: {},
     google: {},
     mymemory: {},
     deepl: { key: '', pro: false },
@@ -187,6 +188,9 @@ export function normalizeSettings(raw) {
     String(raw.engines.microsoft.key || '').trim() !== '';
 
   const settings = mergeSettings(DEFAULT_SETTINGS, raw || {});
+  if (!['auto', 'google', 'mymemory', 'deepl', 'microsoft', 'libre', 'apple', 'openai', 'deepseek', 'gemini', 'claude', 'custom'].includes(settings.engine)) {
+    settings.engine = DEFAULT_SETTINGS.engine;
+  }
   settings.version = APP_VERSION;
   if (!['Touch3', 'Touch4'].includes(settings.shortcuts.toggle) && !String(settings.shortcuts.toggle || '').trim()) {
     settings.shortcuts.toggle = DEFAULT_SETTINGS.shortcuts.toggle;

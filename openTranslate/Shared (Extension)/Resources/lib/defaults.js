@@ -78,7 +78,7 @@ export const DEFAULT_PROMPT = [
 
 export const DEFAULT_SETTINGS = {
   version: APP_VERSION,
-  engine: 'google',
+  engine: 'auto',
   sourceLanguage: 'auto',
   targetLanguage: deviceLanguage(),
   interfaceLanguage: interfaceLanguage(),
@@ -107,6 +107,7 @@ export const DEFAULT_SETTINGS = {
     marginBottom: 12
   },
   engines: {
+    auto: {},
     google: {},
     mymemory: {},
     deepl: { key: '', pro: false },
@@ -189,10 +190,13 @@ export function stripSecrets(settings) {
 }
 
 const isPlainObject = value => !!value && typeof value === 'object' && !Array.isArray(value);
+const cloneValue = value => typeof structuredClone === 'function'
+  ? structuredClone(value)
+  : JSON.parse(JSON.stringify(value));
 
 export function mergeSettings(base, patch) {
-  if (!isPlainObject(patch)) return structuredClone(base);
-  const output = structuredClone(base);
+  if (!isPlainObject(patch)) return cloneValue(base);
+  const output = cloneValue(base);
   for (const [key, value] of Object.entries(patch)) {
     if (isPlainObject(value) && isPlainObject(output[key])) output[key] = mergeSettings(output[key], value);
     else if (value !== undefined) output[key] = value;

@@ -270,6 +270,10 @@ const libre = {
 const apple = {
   id: 'apple',
   async translate({ texts, source = 'auto', target }) {
+    const extensionUrl = typeof chrome !== 'undefined' ? chrome.runtime?.getURL?.('') : '';
+    if (!extensionUrl.startsWith('safari-web-extension:')) {
+      throw new Error('系统翻译仅支持 iOS / macOS 上的 Safari 扩展，请切换到 Google 或 Microsoft 翻译');
+    }
     const runtimes = [
       typeof browser !== 'undefined' ? browser.runtime : null,
       typeof chrome !== 'undefined' ? chrome.runtime : null
@@ -294,6 +298,7 @@ const apple = {
         if (lastError) reject(new Error(lastError.message || '调用系统翻译失败'));
         else resolve(response);
       };
+
       try {
         const pending = usesPromiseApi
           ? runtime.sendNativeMessage('com.stuwang.openTranslate.Extension', { type: 'translate', texts, source, target })
@@ -313,6 +318,25 @@ const apple = {
     return reply.texts;
   }
 };
+
+function isSafariExtension() {
+  const url = typeof chrome !== 'undefined' ? chrome.runtime?.getURL?.('') : '';
+  return String(url).startsWith('safari-web-extension:');
+}
+
+function autoEngineIds(settings = {}) {
+  const configured = settings.engines || {};
+  const ids = ['google', 'mymemory'];
+  if (!configured.microsoft?.useKey || String(configured.microsoft.key || '').trim()) ids.push('microsoft');
+  if (isSafariExtension()) ids.push('apple');
+  if (String(configured.deepl?.key || '').trim()) ids.push('deepl');
+  if (String(configured.libre?.url || '').trim()) ids.push('libre');
+  for (const id of ['openai', 'deepseek', 'gemini', 'claude']) {
+    if (String(configured[id]?.apiKey || '').trim()) ids.push(id);
+  }
+  if (String(configured.custom?.baseUrl || '').trim()) ids.push('custom');
+  return [...new Set(ids)];
+}
 
 function buildPrompt({ texts, source, target, config }) {
   const template = String(config.prompt || '').trim() || DEFAULT_PROMPT;
@@ -609,6 +633,23 @@ export function hasProvider(id) {
 }
 
 export async function translateTexts({ engine, texts, source = 'auto', target, config = {} }) {
+  if (engine === 'auto') {
+    const settings = config.settings || {};
+    const ids = autoEngineIds(settings);
+    const attempts = ids.map(id => translateTexts({
+      engine: id,
+      texts,
+      source,
+      target,
+      config: settings.engines?.[id] || {}
+    }).then(result => ({ result, id })));
+    if (!attempts.length) throw new Error('没有可用的翻译引擎');
+    try {
+      return (await Promise.any(attempts)).result;
+    } catch {
+      throw new Error('所有可用翻译引擎均翻译失败');
+    }
+  }
   const provider = PROVIDERS[engine];
   if (!provider) throw new Error(`未知的翻译引擎：${engine}`);
   if (!Array.isArray(texts) || !texts.length) return [];

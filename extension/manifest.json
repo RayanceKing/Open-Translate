@@ -1,5 +1,6 @@
 {
   "manifest_version": 3,
+  "default_locale": "en",
   "name": "Open Translate",
   "version": "1.0.0",
   "description": "Privacy-conscious in-place bilingual web translation with switchable engines and AI translation.",

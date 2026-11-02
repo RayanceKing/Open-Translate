@@ -1,9 +1,16 @@
 // UI metadata for every translation engine. Kept free of network code so the
 // options page can import it without pulling in the provider implementations.
 
-const ENGINE_PRIORITY = ['apple', 'microsoft', 'google'];
+const ENGINE_PRIORITY = ['auto', 'apple', 'microsoft', 'google'];
 
 const ENGINE_CATALOG_DATA = [
+  {
+    id: 'auto',
+    name: '自动',
+    tag: '智能',
+    note: '并发请求所有已配置且可用的翻译引擎，优先使用最快返回的译文。',
+    fields: []
+  },
   {
     id: 'google',
     name: 'Google 翻译',

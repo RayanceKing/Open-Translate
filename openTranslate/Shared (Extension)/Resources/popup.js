@@ -3,6 +3,9 @@ import { ENGINE_CATALOG } from './lib/catalog.js';
 import { loadSettings, saveSettings } from './lib/store.js';
 import { applyInterfaceLanguage } from './lib/i18n.js';
 
+const isIPadOS = /iPad|Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1;
+if (isIPadOS) document.documentElement.classList.add('ipad-os');
+
 const $ = selector => document.querySelector(selector);
 
 let settings = null;

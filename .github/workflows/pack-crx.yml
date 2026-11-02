@@ -151,6 +151,15 @@ jobs:
 
           ( cd dist && sha256sum *.crx *.zip | tee SHA256SUMS.txt )
 
+      - name: Include userscript
+        run: |
+          set -euo pipefail
+          cp tampermonkey/open-translate.user.js "dist/open-translate.user.js"
+          # 油猴脚本是独立产物（Tampermonkey / 用户脚本管理器），不进 CRX/ZIP，单独作为 Release 资源发布
+          node --check tampermonkey/open-translate.user.js || { echo "::error::open-translate.user.js 语法错误"; exit 1; }
+          ( cd dist && sha256sum open-translate.user.js >> SHA256SUMS.txt )
+          echo "已附带 open-translate.user.js 到 dist/"
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -172,7 +181,7 @@ jobs:
           set -euo pipefail
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "Release $TAG 已存在，追加/覆盖资源"
-            gh release upload "$TAG" dist/*.crx dist/*.zip dist/SHA256SUMS.txt --clobber
+            gh release upload "$TAG" dist/*.crx dist/*.zip dist/SHA256SUMS.txt dist/open-translate.user.js --clobber
           else
             NOTES="Open-Translate v$VERSION
             扩展 ID: $EXT_ID
@@ -181,8 +190,9 @@ jobs:
             下载:
             - .crx 签名安装包（Chrome 对非商店来源 .crx 有策略限制，装不上时请用 .zip）
             - .zip 开发者模式解压加载 / 上架用
+            - open-translate.user.js 油猴脚本（Firefox / 篡改猴 / Violentmonkey，免应用商店）
             - SHA256SUMS.txt 校验和"
-            gh release create "$TAG" dist/*.crx dist/*.zip dist/SHA256SUMS.txt \
+            gh release create "$TAG" dist/*.crx dist/*.zip dist/SHA256SUMS.txt dist/open-translate.user.js \
               --title "Open-Translate v$VERSION" \
               --notes "$NOTES"
           fi
@@ -215,7 +225,7 @@ jobs:
             echo "| 触发 | ${REF_TYPE} ${REF_NAME} |"
             echo "| 提交 | \`${COMMIT}\` |"
             echo ""
-            echo "产物：\`.crx\`（签名安装包）、\`.zip\`（开发者模式加载解压 / 上架用）、\`SHA256SUMS.txt\`。Chrome 对非商店来源的 .crx 有策略限制，装不上时解压 .zip 用「加载已解压的扩展程序」。"
+            echo "产物：\`.crx\`（签名安装包）、\`.zip\`（开发者模式加载解压 / 上架用）、\`SHA256SUMS.txt\`，另有 \`open-translate.user.js\` 油猴脚本。Chrome 对非商店来源的 .crx 有策略限制，装不上时解压 .zip 用「加载已解压的扩展程序」。"
             echo ""
             echo '```'
             cat dist/SHA256SUMS.txt

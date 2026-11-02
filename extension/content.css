@@ -23,6 +23,8 @@
   white-space: pre-wrap;
   overflow-wrap: break-word;
   word-break: break-word;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
   transition: background-color 0.15s ease, filter 0.18s ease;
 }
 
@@ -70,6 +72,14 @@ html.ot-preset-blur .ot-translation:focus-within {
 }
 
 /* ---------- display modes ---------- */
+
+/* In bilingual mode the translation sits right after the original. Give it a
+   little extra separation from the line above so paired source/translation
+   stays easy to read, and clone box decorations so a wrapped translation keeps
+   its underline/background on every line. */
+html.ot-mode-bilingual .ot-translation {
+  margin-top: max(4px, var(--ot-mt, 4px));
+}
 
 .ot-hover-hidden {
   display: none !important;
