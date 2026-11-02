@@ -4,7 +4,6 @@ import { loadSettings, saveSettings } from './lib/store.js';
 import { applyInterfaceLanguage } from './lib/i18n.js';
 
 const $ = selector => document.querySelector(selector);
-const IS_SAFARI = (chrome.runtime.getURL?.('') || '').startsWith('safari-web-extension:');
 
 let settings = null;
 
@@ -26,9 +25,7 @@ function setStatus(text, isError = false) {
 }
 
 function render() {
-  const engines = ENGINE_CATALOG.filter(engine => engine.id !== 'apple' || IS_SAFARI);
-  if (!IS_SAFARI && settings.engine === 'apple') settings.engine = 'google';
-  $('#engine').innerHTML = engines.map(engine => `<option value="${engine.id}">${engine.name}</option>`).join('');
+  $('#engine').innerHTML = ENGINE_CATALOG.map(engine => `<option value="${engine.id}">${engine.name}</option>`).join('');
   $('#language').innerHTML = LANGUAGES.map(item => `<option value="${item.code}">${item.label}</option>`).join('');
 
   $('#engine').value = settings.engine;
@@ -89,36 +86,13 @@ function bind() {
   });
 
   $('#open-options').addEventListener('click', () => {
-    const openOptionsSafe = () => {
-      try {
-        chrome.tabs.create({ url: chrome.runtime.getURL('options.html') });
-      } catch {
-        /* last-resort: Safari sometimes blocks tab creation from popup */
-      }
-    };
-    // chrome.runtime.openOptionsPage() is unreliable in Safari Web Extensions;
-    // opening the options page as a normal tab is the robust path.
-    try {
-      if (typeof chrome.runtime.openOptionsPage === 'function') {
-        chrome.runtime.openOptionsPage(() => {
-          if (chrome.runtime.lastError) openOptionsSafe();
-        });
-      } else {
-        openOptionsSafe();
-      }
-    } catch {
-      openOptionsSafe();
-    }
+    chrome.runtime.openOptionsPage();
     window.close();
   });
 }
 
 async function init() {
   settings = await loadSettings();
-  if (!IS_SAFARI && settings.engine === 'apple') {
-    settings.engine = 'google';
-    settings = await saveSettings(settings);
-  }
   render();
   bind();
 

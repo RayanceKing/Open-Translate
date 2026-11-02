@@ -25,14 +25,14 @@
 }
 
 html {
-  width: 380px;
-  min-width: 380px;
+  width: 100%;
+  min-width: 100%;
 }
 
 body {
-  width: 380px;
-  min-width: 380px;
-  max-width: 380px;
+  width: 100%;
+  min-width: 100%;
+  max-width: none;
   margin: 0;
   padding: 14px;
   background: var(--bg);
@@ -165,7 +165,7 @@ select:focus {
 
 .actions {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-columns: 1fr auto;
   gap: 8px;
   margin-top: 14px;
 }

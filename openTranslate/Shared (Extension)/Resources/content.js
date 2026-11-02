@@ -1693,17 +1693,7 @@
   }
 
   function openOptions() {
-    // Open the options page directly from the content script. This is reliable
-    // on both Chrome and Safari/iOS; the background `open-options` path is kept
-    // only as a last-resort fallback (Safari's service worker cannot always
-    // create a tab on its own).
-    try {
-      if (typeof chrome !== 'undefined' && chrome.tabs && typeof chrome.tabs.create === 'function'
-          && typeof chrome.runtime?.getURL === 'function') {
-        chrome.tabs.create({ url: chrome.runtime.getURL('options.html') });
-        return;
-      }
-    } catch (_) { /* fall through to the background fallback */ }
+    // Safari/iOS content scripts cannot create extension tabs themselves.
     sendMessage({ type: 'open-options' }).catch(() => {});
   }
 

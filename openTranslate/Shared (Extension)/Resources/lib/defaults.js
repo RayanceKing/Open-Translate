@@ -48,7 +48,6 @@ export const LANG_LABEL = Object.fromEntries(LANGUAGES.map(item => [item.code, i
 
 export const DISPLAY_MODES = [
   { id: 'bilingual', name: '双语对照', desc: '原文在上，译文紧随其后，最常用的阅读方式' },
-  { id: 'mixed', name: '混排样式', desc: '一行原文一行译文，译文紧跟在原文所在段落内' },
   { id: 'translation', name: '仅译文', desc: '隐藏原文，只显示译文，适合快速浏览' },
   { id: 'hover', name: '悬停显示', desc: '译文默认隐藏，鼠标移到原文上才浮现' }
 ];
@@ -166,11 +165,38 @@ export const AI_ENGINES = ['openai', 'deepseek', 'gemini', 'claude', 'custom'];
 /** Engines that can read an image and return both OCR + translation in one call. */
 export const VISION_ENGINES = ['openai', 'gemini', 'claude'];
 
+// Which field of each engine's config holds the secret API key. These values are
+// stored in the system Keychain (see lib/store.js + the native Swift handler)
+// and must NEVER be written to local storage or iCloud sync.
+export const SECRET_FIELDS = {
+  openai: 'apiKey',
+  deepseek: 'apiKey',
+  gemini: 'apiKey',
+  claude: 'apiKey',
+  custom: 'apiKey',
+  libre: 'apiKey',
+  deepl: 'key',
+  microsoft: 'key'
+};
+
+// Return a shallow-cloned copy of settings with every secret field blanked, so
+// the result is safe to persist locally or mirror to iCloud.
+export function stripSecrets(settings) {
+  const out = structuredClone(settings);
+  for (const [engine, field] of Object.entries(SECRET_FIELDS)) {
+    if (out.engines && out.engines[engine]) out.engines[engine][field] = '';
+  }
+  return out;
+}
+
 const isPlainObject = value => !!value && typeof value === 'object' && !Array.isArray(value);
+const cloneValue = value => typeof structuredClone === 'function'
+  ? structuredClone(value)
+  : JSON.parse(JSON.stringify(value));
 
 export function mergeSettings(base, patch) {
-  if (!isPlainObject(patch)) return structuredClone(base);
-  const output = structuredClone(base);
+  if (!isPlainObject(patch)) return cloneValue(base);
+  const output = cloneValue(base);
   for (const [key, value] of Object.entries(patch)) {
     if (isPlainObject(value) && isPlainObject(output[key])) output[key] = mergeSettings(output[key], value);
     else if (value !== undefined) output[key] = value;
@@ -189,9 +215,6 @@ export function normalizeSettings(raw) {
     String(raw.engines.microsoft.key || '').trim() !== '';
 
   const settings = mergeSettings(DEFAULT_SETTINGS, raw || {});
-  if (!['auto', 'google', 'mymemory', 'deepl', 'microsoft', 'libre', 'apple', 'openai', 'deepseek', 'gemini', 'claude', 'custom'].includes(settings.engine)) {
-    settings.engine = DEFAULT_SETTINGS.engine;
-  }
   settings.version = APP_VERSION;
   if (!['Touch3', 'Touch4'].includes(settings.shortcuts.toggle) && !String(settings.shortcuts.toggle || '').trim()) {
     settings.shortcuts.toggle = DEFAULT_SETTINGS.shortcuts.toggle;

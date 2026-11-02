@@ -27,13 +27,6 @@ async function ensureSecrets() {
   secretsLoaded = true;
 }
 
-// Prime the cache as soon as the service worker starts.
-refreshSecrets();
-
-// Pull settings from iCloud so a change made on another device is picked up.
-// Writes the newer copy locally; content scripts reload via storage.onChanged.
-syncFromCloud().catch(() => {});
-
 function protectLayout(text) {
   const markers = [];
   const protectedText = String(text).replace(/\r\n|\r|\n|\t/g, whitespace => {
@@ -56,9 +49,11 @@ function promptSalt(settings, engine) {
 }
 
 async function handleTranslate({ texts = [], engine, source, target }, snapshot, skipCache = false) {
-  let settings = snapshot || await loadSettings();
+  let settings = snapshot || await syncFromCloud();
   await ensureSecrets();
-  settings = structuredClone(settings);
+  settings = typeof structuredClone === 'function'
+    ? structuredClone(settings)
+    : JSON.parse(JSON.stringify(settings));
   for (const [engineId, field] of Object.entries(SECRET_FIELDS)) {
     if (secretCache[engineId]) {
       settings.engines[engineId] ??= {};
@@ -68,7 +63,7 @@ async function handleTranslate({ texts = [], engine, source, target }, snapshot,
   const useEngine = engine || settings.engine;
   const to = target || settings.targetLanguage;
   const from = source || settings.sourceLanguage || 'auto';
-  const config = { ...(settings.engines[useEngine] || {}) };
+  const config = { ...(settings.engines[useEngine] || {}), settings };
   const secretField = SECRET_FIELDS[useEngine];
   if (secretField && secretCache[useEngine]) config[secretField] = secretCache[useEngine];
   const isAI = AI_ENGINES.includes(useEngine);

@@ -81,13 +81,6 @@ html.ot-mode-bilingual .ot-translation {
   margin-top: max(4px, var(--ot-mt, 4px));
 }
 
-html.ot-mode-mixed .ot-translation {
-  display: block !important;
-  width: 100%;
-  margin: 0 !important;
-  padding-top: 0;
-}
-
 .ot-hover-hidden {
   display: none !important;
 }
