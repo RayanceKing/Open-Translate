@@ -396,11 +396,28 @@ function protectGlossary(texts, entries) {
   const queue = [];
   const originalHtml = new Map();
   let translating = new WeakSet();
+  const translationSources = new WeakMap();
   let bubble = null;
 
   // ---------------------------------------------------------------- settings
 
   const isPlainObject = value => !!value && typeof value === 'object' && !Array.isArray(value);
+
+  // Run a task during browser idle time (FluentRead-style) so a heavy scan or a
+  // burst of SPA mutations never blocks first paint or scrolling. Falls back to
+  // a short timeout where requestIdleCallback is unavailable (older Safari,
+  // some embedded webviews).
+  const ric = typeof requestIdleCallback === 'function'
+    ? requestIdleCallback
+    : (cb => setTimeout(() => cb({ didTimeout: false, timeRemaining: () => 0 }), 1));
+  const idle = callback => new Promise(resolve => {
+    try {
+      ric(deadline => {
+        try { resolve(callback(deadline)); }
+        catch (error) { console.warn('Open Translate:', error); resolve(); }
+      });
+    } catch { resolve(); }
+  });
 
   function deepMerge(base, patch) {
     if (!isPlainObject(patch)) return base;
@@ -1793,6 +1810,7 @@ function protectGlossary(texts, entries) {
     const node = document.createElement('div');
     node.className = 'ot-translation ot-pending';
     node.setAttribute(MARK, 'translation');
+    translationSources.set(node, el.cloneNode(true));
     const sourceStyle = getComputedStyle(el);
     for (const property of [
       'display', 'font-family', 'font-size', 'font-weight', 'font-style', 'font-variant',
@@ -1837,6 +1855,33 @@ function protectGlossary(texts, entries) {
     return node;
   }
 
+  function formattedSegments(node) {
+    const snapshot = translationSources.get(node);
+    if (!snapshot) return [];
+    const walker = document.createTreeWalker(snapshot, NodeFilter.SHOW_TEXT);
+    const segments = [];
+    let current;
+    while ((current = walker.nextNode())) {
+      if (current.nodeValue?.trim()) segments.push(current.nodeValue);
+    }
+    return segments;
+  }
+
+  function fillFormattedTranslation(node, translations) {
+    const snapshot = translationSources.get(node);
+    if (!snapshot) {
+      node.textContent = translations.join('');
+      return;
+    }
+    const walker = document.createTreeWalker(snapshot, NodeFilter.SHOW_TEXT);
+    let index = 0;
+    let current;
+    while ((current = walker.nextNode())) {
+      if (current.nodeValue?.trim()) current.nodeValue = translations[index++] || '';
+    }
+    node.replaceChildren(...Array.from(snapshot.childNodes).map(child => child.cloneNode(true)));
+  }
+
   function settle(node, text, error) {
     if (!node?.isConnected) return;
     node.classList.remove('ot-pending');
@@ -1845,18 +1890,45 @@ function protectGlossary(texts, entries) {
       node.textContent = `翻译失败：${error}`;
       node.classList.add('ot-error');
     } else {
-      node.textContent = text;
+      fillFormattedTranslation(node, text);
       if (settings.style.loadingStyle === 'apple') node.classList.add('ot-result-reveal');
     }
   }
 
+  // Translate the blocks nearest the top of the viewport first so the reader
+  // sees results where they are actually looking (reading order), rather than
+  // in raw scan order. A single cheap layout read per drain keeps this smooth.
+  function prioritize() {
+    if (queue.length < 2) return;
+    const tops = new Map();
+    for (const item of queue) {
+      let top = 1e9;
+      try {
+        const rect = item.el.getBoundingClientRect();
+        // Above the viewport (top < 0) sorts last; everything else by top.
+        top = rect.top < 0 ? 1e9 : rect.top;
+      } catch { /* node detached: deprioritize */ }
+      tops.set(item, top);
+    }
+    queue.sort((a, b) => tops.get(a) - tops.get(b));
+  }
+
   function pump() {
     if (!active) return;
+    prioritize();
     while (inflight < settings.concurrency && queue.length) {
       const batch = queue.splice(0, Math.max(1, settings.batchSize));
       inflight += 1;
-      withTranslationTimeout(requestTranslation(batch.map(item => item.text)))
-        .then(texts => batch.forEach((item, index) => settle(item.node, texts[index], texts[index] ? null : '空译文')))
+      const segments = batch.flatMap(item => item.segments);
+      withTranslationTimeout(requestTranslation(segments))
+        .then(texts => {
+          let offset = 0;
+          batch.forEach(item => {
+            const values = texts.slice(offset, offset + item.segments.length);
+            offset += item.segments.length;
+            settle(item.node, values, values.some(Boolean) ? null : '空译文');
+          });
+        })
         .catch(error => batch.forEach(item => settle(item.node, null, error?.message || '未知错误')))
         .finally(() => {
           inflight -= 1;
@@ -1867,10 +1939,19 @@ function protectGlossary(texts, entries) {
 
   function enqueue(el) {
     if (!active || translating.has(el)) return;
-    const text = translationText(el.innerText || el.textContent);
-    if (!text) return;
+    const node = mountTranslation(el);
+    const segments = formattedSegments(node);
+    if (!segments.length) {
+      node.remove();
+      return;
+    }
+    const text = translationText(segments.join(' '));
+    if (!text) {
+      node.remove();
+      return;
+    }
     translating.add(el);
-    queue.push({ el, node: mountTranslation(el), text });
+    queue.push({ el, node, text, segments });
     pump();
   }
 
@@ -2007,10 +2088,10 @@ function protectGlossary(texts, entries) {
     }
     active = true;
     updatePanel();
-    scan(document);
-    // Translate the above-the-fold blocks right away instead of waiting for
-    // the observer / next scroll tick.
-    flushVisible();
+    // Defer the (potentially heavy) full-page scan to idle time so enabling
+    // translation never blocks first paint or scrolling, then translate the
+    // now-collected above-the-fold blocks.
+    idle(() => { scan(document); flushVisible(); });
     startSweeping();
   }
 
@@ -2018,13 +2099,31 @@ function protectGlossary(texts, entries) {
 
   function observe() {
     observer?.disconnect();
+    let dirty = [];
+    let scheduled = false;
+    // Coalesce the burst of added-node records an SPA fires into a single scan
+    // that runs during idle time, instead of calling scan() synchronously for
+    // every node (which thrashes layout on heavy pages).
+    const flushDirty = () => {
+      scheduled = false;
+      const roots = dirty;
+      dirty = [];
+      for (const node of roots) {
+        if (!node.isConnected) continue;
+        scan(node);
+      }
+    };
     observer = new MutationObserver(records => {
       if (!active || !document.body) return;
       for (const record of records) {
         for (const node of record.addedNodes) {
           if (node.nodeType !== 1 || node.hasAttribute?.(MARK)) continue;
-          scan(node);
+          dirty.push(node);
         }
+      }
+      if (!scheduled) {
+        scheduled = true;
+        idle(flushDirty);
       }
     });
     if (document.body) observer.observe(document.body, { childList: true, subtree: true });
@@ -2964,7 +3063,7 @@ function protectGlossary(texts, entries) {
         color: var(--ot-color, inherit); opacity: var(--ot-op, 1);
         margin: var(--ot-mt, 4px) 0 var(--ot-mb, 12px); padding: var(--ot-py, 2px) var(--ot-px, 8px);
         border-radius: var(--ot-radius, 6px); background: transparent; white-space: pre-wrap;
-        overflow-wrap: break-word; transition: background-color .15s ease, filter .18s ease; }
+        overflow-wrap: break-word; -webkit-box-decoration-break: clone; box-decoration-break: clone; transition: background-color .15s ease, filter .18s ease; }
       html.ot-preset-underline .ot-translation { padding-bottom: 3px; border-bottom: 1px dashed var(--ot-accent-line); }
       html.ot-preset-divider .ot-translation { padding-left: 10px; border-left: 2px solid var(--ot-accent-line); }
       html.ot-preset-card .ot-translation { padding: 10px 12px; background: var(--ot-bg); border: 1px solid var(--ot-accent-line); }
@@ -2973,6 +3072,11 @@ function protectGlossary(texts, entries) {
       html.ot-preset-faded .ot-translation { opacity: calc(var(--ot-op, 1) * .68); }
       html.ot-preset-blur .ot-translation { filter: blur(4px); }
       html.ot-preset-blur .ot-translation:hover { filter: none; }
+      /* In bilingual mode the translation sits right after the original. Give it a
+         little extra separation from the line above so paired source/translation
+         stays easy to read, and clone box decorations so a wrapped translation
+         keeps its underline/background on every line. */
+      html.ot-mode-bilingual .ot-translation { margin-top: max(4px, var(--ot-mt, 4px)); }
       .ot-hover-hidden { display: none !important; }
       .ot-hover-visible { display: inline-block !important; }
       .ot-pending { opacity: calc(var(--ot-op, 1) * .55); font-style: italic; }

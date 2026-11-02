@@ -86,7 +86,26 @@ function bind() {
   });
 
   $('#open-options').addEventListener('click', () => {
-    chrome.runtime.openOptionsPage();
+    const openOptionsSafe = () => {
+      try {
+        chrome.tabs.create({ url: chrome.runtime.getURL('options.html') });
+      } catch {
+        /* last-resort: Safari sometimes blocks tab creation from popup */
+      }
+    };
+    // chrome.runtime.openOptionsPage() is unreliable in Safari Web Extensions;
+    // opening the options page as a normal tab is the robust path.
+    try {
+      if (typeof chrome.runtime.openOptionsPage === 'function') {
+        chrome.runtime.openOptionsPage(() => {
+          if (chrome.runtime.lastError) openOptionsSafe();
+        });
+      } else {
+        openOptionsSafe();
+      }
+    } catch {
+      openOptionsSafe();
+    }
     window.close();
   });
 }
