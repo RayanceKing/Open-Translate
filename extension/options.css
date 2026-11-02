@@ -352,6 +352,12 @@ body {
   margin-bottom: 30px;
 }
 
+.title-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
 .page-head h1 {
   margin: 0 0 5px;
   font-size: 27px;

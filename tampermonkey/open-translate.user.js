@@ -5,6 +5,7 @@
 // @description  In-place bilingual translation with switchable engines, AI providers and style presets. Option+T to toggle.
 // @author       Open Translate contributors
 // @license      AGPLv3
+// @icon         https://raw.githubusercontent.com/RayanceKing/open-translate/dev/extension/images/icon-128.png
 // @match        http://*/*
 // @match        https://*/*
 // @grant        GM_xmlhttpRequest
