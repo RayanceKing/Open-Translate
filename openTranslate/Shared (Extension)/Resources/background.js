@@ -56,8 +56,15 @@ function promptSalt(settings, engine) {
 }
 
 async function handleTranslate({ texts = [], engine, source, target }, snapshot, skipCache = false) {
-  const settings = snapshot || await loadSettings();
+  let settings = snapshot || await loadSettings();
   await ensureSecrets();
+  settings = structuredClone(settings);
+  for (const [engineId, field] of Object.entries(SECRET_FIELDS)) {
+    if (secretCache[engineId]) {
+      settings.engines[engineId] ??= {};
+      settings.engines[engineId][field] = secretCache[engineId];
+    }
+  }
   const useEngine = engine || settings.engine;
   const to = target || settings.targetLanguage;
   const from = source || settings.sourceLanguage || 'auto';

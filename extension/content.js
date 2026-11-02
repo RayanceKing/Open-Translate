@@ -22,6 +22,7 @@
   const LAZY_ROOT_MARGIN = '400px 0px';
   const LAZY_MARGIN_PX = 400;
   const ENGINE_SHORT = {
+    auto: '自动',
     google: 'Google',
     mymemory: 'MyMemory',
     deepl: 'DeepL',

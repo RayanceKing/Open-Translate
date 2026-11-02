@@ -37,7 +37,7 @@ async function handleTranslate({ texts = [], engine, source, target }, snapshot,
   const useEngine = engine || settings.engine;
   const to = target || settings.targetLanguage;
   const from = source || settings.sourceLanguage || 'auto';
-  const config = { ...(settings.engines[useEngine] || {}) };
+  const config = { ...(settings.engines[useEngine] || {}), settings };
   const isAI = AI_ENGINES.includes(useEngine);
   const entries = isAI || settings.glossary?.machineTranslation ? resolveGlossary(settings, to) : [];
   if (isAI) {

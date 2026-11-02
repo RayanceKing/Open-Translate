@@ -269,6 +269,7 @@ function protectGlossary(texts, entries) {
   const LANG_LABEL = Object.fromEntries(LANGUAGES);
 
   const ENGINE_NAMES = {
+    auto: '自动',
     microsoft: 'Microsoft 翻译', google: 'Google 翻译',
     mymemory: 'MyMemory', deepl: 'DeepL',
     libre: 'LibreTranslate', openai: 'OpenAI', deepseek: 'DeepSeek', gemini: 'Google Gemini', claude: 'Claude',
@@ -276,6 +277,7 @@ function protectGlossary(texts, entries) {
   };
 
   const ENGINE_SHORT = {
+    auto: '自动',
     google: 'Google', mymemory: 'MyMemory', deepl: 'DeepL', microsoft: '微软',
     libre: 'Libre', openai: 'OpenAI', deepseek: 'DeepSeek', gemini: 'Gemini', claude: 'Claude',
     custom: '自定义'
@@ -342,7 +344,7 @@ function protectGlossary(texts, entries) {
   const LEGACY_ACCENT = '#6d5dfc';
 
   const DEFAULTS = {
-    engine: 'google',
+    engine: 'auto',
     sourceLanguage: 'auto',
     targetLanguage: (() => {
       const language = String(navigator.language || '').toLowerCase();
@@ -370,6 +372,7 @@ function protectGlossary(texts, entries) {
     glossary: { enabled: true, machineTranslation: false, libraryIds: [], customTerms: '', customTargetLanguage: '*' },
     shortcuts: { toggle: 'Alt+T', selection: 'Alt+Shift+T' },
     engines: {
+      auto: {},
       google: {}, mymemory: {},
       deepl: { key: '', pro: false },
       microsoft: { useKey: false, key: '', region: 'global' },
@@ -724,6 +727,26 @@ function protectGlossary(texts, entries) {
 
   async function translateBatch(texts, target, config) {
     const engine = config.engine;
+    if (engine === 'auto') {
+      const configured = config.engines || {};
+      const ids = ['google', 'mymemory'];
+      if (!configured.microsoft?.useKey || configured.microsoft.key) ids.push('microsoft');
+      if (configured.deepl?.key) ids.push('deepl');
+      if (configured.libre?.url) ids.push('libre');
+      for (const id of ['openai', 'deepseek', 'gemini', 'claude']) {
+        if (configured[id]?.apiKey) ids.push(id);
+      }
+      if (configured.custom?.baseUrl) ids.push('custom');
+      if (!ids.length) throw new Error('没有可用的翻译引擎');
+      try {
+        return await Promise.any(ids.map(id => translateBatch(texts, target, {
+          ...config,
+          engine: id
+        })));
+      } catch {
+        throw new Error('所有可用翻译引擎均翻译失败');
+      }
+    }
     const cfg = config.engines[engine] || {};
 
     if (engine === 'google') {
