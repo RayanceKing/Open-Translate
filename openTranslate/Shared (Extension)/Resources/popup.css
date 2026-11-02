@@ -227,3 +227,70 @@ kbd {
   background: var(--field);
   font: 11px/1.5 ui-monospace, Menlo, monospace;
 }
+
+@media (hover: hover) and (pointer: fine) {
+  html {
+    width: 420px;
+    min-width: 420px;
+  }
+
+  body {
+    width: 420px;
+    min-width: 420px;
+    max-width: 420px;
+    padding: 18px;
+    font-size: 14px;
+  }
+
+  .head-text strong {
+    white-space: nowrap;
+    font-size: 14px;
+  }
+
+  .field > label {
+    font-size: 12.5px;
+  }
+
+  select,
+  .segmented button,
+  .primary,
+  .ghost {
+    font-size: 14px;
+  }
+
+  .actions {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .primary,
+  .ghost {
+    white-space: nowrap;
+  }
+}
+
+html.ipad-os {
+  width: 360px;
+  min-width: 360px;
+}
+
+html.ipad-os body {
+  width: 360px;
+  min-width: 360px;
+  max-width: 360px;
+  padding: 14px;
+  font-size: 13px;
+}
+
+html.ipad-os .head-text strong {
+  white-space: nowrap;
+  font-size: 13px;
+}
+
+html.ipad-os .actions {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+
+html.ipad-os .primary,
+html.ipad-os .ghost {
+  white-space: nowrap;
+}
