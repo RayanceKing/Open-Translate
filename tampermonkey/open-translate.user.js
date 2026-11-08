@@ -557,14 +557,27 @@ function protectGlossary(texts, entries) {
     const protectedText = String(text).replace(/\r\n|\r|\n|\t/g, whitespace => {
       const index = markers.length;
       markers.push(whitespace);
-      return `\uE000OT_WS_${index}\uE001`;
+      return `__OT_WS_${index}__`;
     });
     return {
       text: protectedText,
       restore(value) {
-        return String(value || '').replace(/\uE000OT_WS_(\d+)\uE001/g, (_, index) => markers[Number(index)] || '');
+        // ASCII-only token (no Private Use Area chars) so machine-translation
+        // engines don't strip the delimiter and leak bare "OT_WS_<n>".
+        // \s* tolerates engines that insert/drop spaces around underscores.
+        return String(value || '').replace(/__\s*OT_WS\s*_\s*(\d+)\s*__/g, (_, index) => markers[Number(index)] || '');
       }
     };
+  }
+
+  // Defensive: purge stale layout markers left by older cached translations or
+  // by an engine that mangled the token (PUA delimiters / replacement glyphs /
+  // bare OT_WS_<n>). Keeps cached bad output from being rendered after the fix.
+  const STALE_LAYOUT_MARKER = /[\uE000-\uF8FF\uFFFD\uFFFC\u2261_]*\s*OT_WS\s*_\s*\d+\s*[\uE000-\uF8FF\uFFFD\uFFFC\u2261_]*/gi;
+  function stripStaleMarkers(value) {
+    const text = String(value || '');
+    if (!/ot_ws/i.test(text)) return text;
+    return text.replace(STALE_LAYOUT_MARKER, '').replace(/[ \t]{2,}/g, ' ');
   }
 
   // ---------------------------------------------------------------- transport
@@ -995,7 +1008,7 @@ function protectGlossary(texts, entries) {
       if (stored.length > CACHE_LIMIT) stored.slice(0, stored.length - CACHE_LIMIT).forEach(key => delete entries[key]);
       cacheFlush();
     }
-    return results;
+    return results.map(text => typeof text === 'string' ? stripStaleMarkers(text) : text);
   }
 
   // ---------------------------------------------------------------- subtitles

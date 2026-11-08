@@ -11,14 +11,14 @@
     ],
   },
   "files": [
-    { "path": "openTranslate (macOS).entitlements" },
-    { "path": "openTranslate (iOS).entitlements" },
+    { "path": "OpenTranslate (macOS).entitlements" },
+    { "path": "OpenTranslate (iOS).entitlements" },
     {
       "kind": "folder",
       "path": "Shared (App)",
       "membership-exceptions": [
         {
-          "target": "openTranslate (iOS)",
+          "target": "OpenTranslate (iOS)",
           "inclusions": [
             "/Localized: Resources/Main.html",
             "Assets.xcassets",
@@ -28,7 +28,7 @@
             "ViewController.swift",
           ],
         }, {
-          "target": "openTranslate (macOS)",
+          "target": "OpenTranslate (macOS)",
           "inclusions": [
             "/Localized: Resources/Main.html",
             "Assets.xcassets",
@@ -49,7 +49,7 @@
       ],
       "membership-exceptions": [
         {
-          "target": "openTranslate Extension (iOS)",
+          "target": "OpenTranslate Extension (iOS)",
           "inclusions": [
             "Resources/_locales",
             "Resources/background.js",
@@ -67,7 +67,7 @@
             "SafariWebExtensionHandler.swift",
           ],
         }, {
-          "target": "openTranslate Extension (macOS)",
+          "target": "OpenTranslate Extension (macOS)",
           "inclusions": [
             "Resources/_locales",
             "Resources/background.js",
@@ -90,27 +90,27 @@
       "kind": "folder",
       "path": "iOS (App)",
       "target-membership": [
-        "openTranslate (iOS)",
+        "OpenTranslate (iOS)",
       ],
       "membership-exceptions": [
         {
-          "target": "openTranslate (iOS)",
+          "target": "OpenTranslate (iOS)",
           "exclusions": [
             "Info.plist",
           ],
         },
       ],
     },
-    { "kind": "folder", "path": "macOS (App)", "target-membership": [ "openTranslate (macOS)" ] },
+    { "kind": "folder", "path": "macOS (App)", "target-membership": [ "OpenTranslate (macOS)" ] },
     {
       "kind": "folder",
       "path": "iOS (Extension)",
       "target-membership": [
-        "openTranslate Extension (iOS)",
+        "OpenTranslate Extension (iOS)",
       ],
       "membership-exceptions": [
         {
-          "target": "openTranslate Extension (iOS)",
+          "target": "OpenTranslate Extension (iOS)",
           "exclusions": [
             "Info.plist",
           ],
@@ -120,11 +120,11 @@
       "kind": "folder",
       "path": "macOS (Extension)",
       "target-membership": [
-        "openTranslate Extension (macOS)",
+        "OpenTranslate Extension (macOS)",
       ],
       "membership-exceptions": [
         {
-          "target": "openTranslate Extension (macOS)",
+          "target": "OpenTranslate Extension (macOS)",
           "exclusions": [
             "Info.plist",
           ],
@@ -133,30 +133,30 @@
     }, {
       "path": "icon.icon",
       "target-membership": [
-        "openTranslate (iOS)/resources",
-        "openTranslate (macOS)/resources",
-        "openTranslate Extension (iOS)/resources",
-        "openTranslate Extension (macOS)/resources",
+        "OpenTranslate (iOS)/resources",
+        "OpenTranslate (macOS)/resources",
+        "OpenTranslate Extension (iOS)/resources",
+        "OpenTranslate Extension (macOS)/resources",
       ],
     }, {
       "kind": "group",
       "name": "Products",
       "children": [
-        { "path": "<PRODUCTS>/openTranslate.app", "id": "45CC750530963463009C308F", "type": "wrapper.application", "index": false },
-        { "path": "<PRODUCTS>/openTranslate.app", "id": "45CC751730963463009C308F", "type": "wrapper.application", "index": false },
-        { "path": "<PRODUCTS>/openTranslate Extension.appex", "id": "45CC752230963463009C308F", "type": "wrapper.app-extension", "index": false, "target-membership": [ { "build-phase": "openTranslate (iOS)/copy/Embed Foundation Extensions", "header-preservation": "remove-on-copy" } ] },
-        { "path": "<PRODUCTS>/openTranslate Extension.appex", "id": "45CC752C30963463009C308F", "type": "wrapper.app-extension", "index": false, "target-membership": [ { "build-phase": "openTranslate (macOS)/copy/Embed Foundation Extensions", "header-preservation": "remove-on-copy" } ] },
+        { "path": "<PRODUCTS>/OpenTranslate.app", "id": "45CC750530963463009C308F", "type": "wrapper.application", "index": false },
+        { "path": "<PRODUCTS>/OpenTranslate.app", "id": "45CC751730963463009C308F", "type": "wrapper.application", "index": false },
+        { "path": "<PRODUCTS>/OpenTranslate Extension.appex", "id": "45CC752230963463009C308F", "type": "wrapper.app-extension", "index": false, "target-membership": [ { "build-phase": "OpenTranslate (iOS)/copy/Embed Foundation Extensions", "header-preservation": "remove-on-copy" } ] },
+        { "path": "<PRODUCTS>/OpenTranslate Extension.appex", "id": "45CC752C30963463009C308F", "type": "wrapper.app-extension", "index": false, "target-membership": [ { "build-phase": "OpenTranslate (macOS)/copy/Embed Foundation Extensions", "header-preservation": "remove-on-copy" } ] },
       ],
     },
   ],
   "targets": [
     {
-      "name": "openTranslate (iOS)",
+      "name": "OpenTranslate (iOS)",
       "id": "45CC750430963463009C308F",
       "product": "id:45CC750530963463009C308F",
       "product-type": "application",
       "dependencies": [
-        "openTranslate Extension (iOS)",
+        "OpenTranslate Extension (iOS)",
       ],
       "build-phases": [
         "compile-sources",
@@ -172,7 +172,7 @@
         "ASSETCATALOG_COMPILER_APPICON_NAME": "icon",
         "ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME": "AccentColor",
         "ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS": "NO",
-        "CODE_SIGN_ENTITLEMENTS": "openTranslate (iOS).entitlements",
+        "CODE_SIGN_ENTITLEMENTS": "OpenTranslate (iOS).entitlements",
         "CODE_SIGN_STYLE": "Automatic",
         "CURRENT_PROJECT_VERSION": "1",
         "DEVELOPMENT_TEAM": "H2NS3XTS96",
@@ -201,7 +201,7 @@
           "WebKit",
         ],
         "PRODUCT_BUNDLE_IDENTIFIER": "com.stuwang.openTranslate",
-        "PRODUCT_NAME": "openTranslate",
+        "PRODUCT_NAME": "OpenTranslate",
         "REGISTER_APP_GROUPS": "YES",
         "SDKROOT": "iphoneos",
         "STRING_CATALOG_GENERATE_SYMBOLS": "YES",
@@ -218,12 +218,12 @@
         "VALIDATE_PRODUCT[config=Release]": "YES",
       },
     }, {
-      "name": "openTranslate (macOS)",
+      "name": "OpenTranslate (macOS)",
       "id": "45CC751630963463009C308F",
       "product": "id:45CC751730963463009C308F",
       "product-type": "application",
       "dependencies": [
-        "openTranslate Extension (macOS)",
+        "OpenTranslate Extension (macOS)",
       ],
       "build-phases": [
         "compile-sources",
@@ -238,7 +238,7 @@
       "build-settings": {
         "ASSETCATALOG_COMPILER_APPICON_NAME": "icon",
         "ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME": "AccentColor",
-        "CODE_SIGN_ENTITLEMENTS": "openTranslate (macOS).entitlements",
+        "CODE_SIGN_ENTITLEMENTS": "OpenTranslate (macOS).entitlements",
         "CODE_SIGN_STYLE": "Automatic",
         "CURRENT_PROJECT_VERSION": "1",
         "DEVELOPMENT_TEAM": "H2NS3XTS96",
@@ -264,7 +264,7 @@
           "WebKit",
         ],
         "PRODUCT_BUNDLE_IDENTIFIER": "com.stuwang.openTranslate",
-        "PRODUCT_NAME": "openTranslate",
+        "PRODUCT_NAME": "OpenTranslate",
         "REGISTER_APP_GROUPS": "YES",
         "SDKROOT": "macosx",
         "STRING_CATALOG_GENERATE_SYMBOLS": "YES",
@@ -275,7 +275,7 @@
         "SWIFT_VERSION": "5.0",
       },
     }, {
-      "name": "openTranslate Extension (iOS)",
+      "name": "OpenTranslate Extension (iOS)",
       "id": "45CC752130963463009C308F",
       "product": "id:45CC752230963463009C308F",
       "product-type": "app-extension",
@@ -308,7 +308,7 @@
           "SafariServices",
         ],
         "PRODUCT_BUNDLE_IDENTIFIER": "com.stuwang.openTranslate.Extension",
-        "PRODUCT_NAME": "openTranslate Extension",
+        "PRODUCT_NAME": "OpenTranslate Extension",
         "REGISTER_APP_GROUPS": "YES",
         "SDKROOT": "iphoneos",
         "SKIP_INSTALL": "YES",
@@ -325,7 +325,7 @@
         "VALIDATE_PRODUCT[config=Release]": "YES",
       },
     }, {
-      "name": "openTranslate Extension (macOS)",
+      "name": "OpenTranslate Extension (macOS)",
       "id": "45CC752B30963463009C308F",
       "product": "id:45CC752C30963463009C308F",
       "product-type": "app-extension",
@@ -357,7 +357,7 @@
           "SafariServices",
         ],
         "PRODUCT_BUNDLE_IDENTIFIER": "com.stuwang.openTranslate.Extension",
-        "PRODUCT_NAME": "openTranslate Extension",
+        "PRODUCT_NAME": "OpenTranslate Extension",
         "SDKROOT": "macosx",
         "SKIP_INSTALL": "YES",
         "STRING_CATALOG_GENERATE_SYMBOLS": "YES",

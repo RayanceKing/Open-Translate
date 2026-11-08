@@ -16,8 +16,9 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "45CC750430963463009C308F"
-               BuildableName = "openTranslate.app"
-               ReferencedContainer = "container:openTranslate.xcodeproj">
+               BuildableName = "OpenTranslate.app"
+               BlueprintName = "OpenTranslate (iOS)"
+               ReferencedContainer = "container:OpenTranslate.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
       </BuildActionEntries>
@@ -45,8 +46,9 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "45CC750430963463009C308F"
-            BuildableName = "openTranslate.app"
-            ReferencedContainer = "container:openTranslate.xcodeproj">
+            BuildableName = "OpenTranslate.app"
+            BlueprintName = "OpenTranslate (iOS)"
+            ReferencedContainer = "container:OpenTranslate.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
    </LaunchAction>
@@ -61,8 +63,9 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "45CC750430963463009C308F"
-            BuildableName = "openTranslate.app"
-            ReferencedContainer = "container:openTranslate.xcodeproj">
+            BuildableName = "OpenTranslate.app"
+            BlueprintName = "OpenTranslate (iOS)"
+            ReferencedContainer = "container:OpenTranslate.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
    </ProfileAction>
