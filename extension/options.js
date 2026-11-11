@@ -1,3 +1,4 @@
+import './lib/webext.js';
 import {
   APP_VERSION,
   AI_ENGINES,
@@ -20,6 +21,9 @@ import { parseCustomTerms, serializeGlossaryCsv } from './lib/glossary.js';
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
+const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, ch => ({
+  '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+})[ch]);
 
 const IS_SAFARI = typeof chrome !== 'undefined' && !!chrome.runtime &&
   (chrome.runtime.getURL?.('') || '').startsWith('safari-web-extension:');
@@ -33,23 +37,36 @@ const setPath = (object, path, value) => {
   target[last] = value;
 };
 
-// Safari's `chrome` shim does NOT return a promise from runtime.sendMessage and
-// requires a callback, so route every call through this helper. It also reports
-// `chrome.runtime.lastError` instead of swallowing it.
+// Safari's `chrome` shim only honours the callback form; Firefox and modern
+// Chrome additionally return a Promise. Consume whichever settles first and
+// always handle the other channel, so a missing receiver never produces an
+// unhandled rejection (Firefox rejects the Promise in that case).
 function sendMessage(message) {
   return new Promise((resolve, reject) => {
+    if (typeof chrome?.runtime?.sendMessage !== 'function') {
+      reject(new Error('runtime.sendMessage 不可用'));
+      return;
+    }
+    let settled = false;
+    const finish = (apply, value) => {
+      if (settled) return;
+      settled = true;
+      apply(value);
+    };
     try {
-      if (typeof chrome?.runtime?.sendMessage !== 'function') {
-        reject(new Error('chrome.runtime.sendMessage 不可用'));
-        return;
-      }
-      chrome.runtime.sendMessage(message, response => {
-        const lastError = chrome.runtime.lastError;
-        if (lastError) reject(new Error(lastError.message || '消息发送失败'));
-        else resolve(response);
+      const pending = chrome.runtime.sendMessage(message, response => {
+        const lastError = chrome.runtime?.lastError;
+        if (lastError) finish(reject, new Error(lastError.message || '消息发送失败'));
+        else finish(resolve, response);
       });
+      if (pending && typeof pending.then === 'function') {
+        pending.then(
+          response => finish(resolve, response),
+          error => finish(reject, error instanceof Error ? error : new Error(String(error?.message || error)))
+        );
+      }
     } catch (error) {
-      reject(error);
+      finish(reject, error);
     }
   });
 }
@@ -272,7 +289,8 @@ function renderServices() {
   const container = $('#services-list');
   container.innerHTML = VISIBLE_ENGINES.map(engine => {
     const config = settings.engines[engine.id] || {};
-    const serviceName = engine.id === 'custom' && config.name?.trim() ? config.name.trim() : engine.name;
+    // User-supplied custom engine name is interpolated into the markup below.
+    const serviceName = escapeHtml(engine.id === 'custom' && config.name?.trim() ? config.name.trim() : engine.name);
     const fields = (Array.isArray(engine.fields) ? engine.fields : [])
       .map(field => {
         const depends = field.dependsOn ? ` data-depends="${field.dependsOn}"` : '';
@@ -835,7 +853,7 @@ async function init() {
     console.error('Open Translate settings initialization failed', error);
     const list = $('#services-list');
     if (list && !list.children.length) {
-      const detail = error?.message ? `（${error.message}）` : '';
+      const detail = error?.message ? `（${escapeHtml(error.message)}）` : '';
       list.innerHTML = `<div class="card error-card">翻译服务加载失败，请重新打开设置页。${detail}</div>`;
     }
   }

@@ -1,3 +1,4 @@
+import './lib/webext.js';
 import { loadSettings } from './lib/store.js';
 import {
   translateTexts,
@@ -182,7 +183,13 @@ chrome.runtime.onMessage.addListener((message, _sender, respond) => {
   if (message?.type === 'open-options') {
     const url = chrome.runtime.getURL('options.html');
     const openByTab = () => {
-      try { if (typeof chrome.tabs?.create === 'function') chrome.tabs.create({ url }); } catch {}
+      try {
+        const pending = typeof chrome.tabs?.create === 'function'
+          ? chrome.tabs.create({ url }) : null;
+        // Firefox returns a Promise here; consume a rejection instead of
+        // leaving an unhandled one behind when the tab cannot be opened.
+        if (pending && typeof pending.catch === 'function') pending.catch(() => {});
+      } catch {}
     };
     try {
       if (IS_SAFARI || typeof chrome.runtime.openOptionsPage !== 'function') openByTab();
@@ -207,7 +214,8 @@ chrome.runtime.onInstalled.addListener(() => {
   // Dynamic rules persist across restarts; a missing DNR API is a no-op.
   installIndexTranslateHeaderRule().catch(() => {});
   try {
-    chrome.contextMenus.create({ id: 'ot-translate-selection', title: '翻译选中文本', contexts: ['selection'] });
+    const pending = chrome.contextMenus.create({ id: 'ot-translate-selection', title: '翻译选中文本', contexts: ['selection'] });
+    if (pending && typeof pending.catch === 'function') pending.catch(() => {});
   } catch {
     /* menu may already exist after an update */
   }

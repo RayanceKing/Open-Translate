@@ -1,6 +1,13 @@
 (() => {
   'use strict';
 
+  // Content scripts cannot import modules, so the namespace fallback is inlined
+  // here (see lib/webext.js). Firefox normally provides `chrome` as a
+  // compatibility alias for its promise-based `browser` API.
+  if (typeof chrome === 'undefined' && typeof browser !== 'undefined' && browser?.runtime?.id) {
+    globalThis.chrome = browser;
+  }
+
   const captchaContext = (() => {
     const value = `${location.href} ${location.hostname}`.toLowerCase();
     if (/(recaptcha|hcaptcha|challenges\.cloudflare\.com|turnstile)/.test(value)) return true;
@@ -224,23 +231,36 @@
 
   // ---------------------------------------------------------------- messaging
 
-  // Safari's `chrome` shim does not return a promise from runtime.sendMessage
-  // and requires a callback, so route every call through this helper and surface
-  // chrome.runtime.lastError instead of swallowing it.
+  // Safari's `chrome` shim only honours the callback form; Firefox and modern
+  // Chrome additionally return a Promise. Consume whichever settles first and
+  // always handle the other channel, so a missing receiver never produces an
+  // unhandled rejection (Firefox rejects the Promise in that case).
   function sendMessage(message) {
     return new Promise((resolve, reject) => {
+      if (typeof chrome?.runtime?.sendMessage !== 'function') {
+        reject(new Error('runtime.sendMessage 不可用'));
+        return;
+      }
+      let settled = false;
+      const finish = (apply, value) => {
+        if (settled) return;
+        settled = true;
+        apply(value);
+      };
       try {
-        if (typeof chrome?.runtime?.sendMessage !== 'function') {
-          reject(new Error('chrome.runtime.sendMessage 不可用'));
-          return;
-        }
-        chrome.runtime.sendMessage(message, response => {
-          const lastError = chrome.runtime.lastError;
-          if (lastError) reject(new Error(lastError.message || '消息发送失败'));
-          else resolve(response);
+        const pending = chrome.runtime.sendMessage(message, response => {
+          const lastError = chrome.runtime?.lastError;
+          if (lastError) finish(reject, new Error(lastError.message || '消息发送失败'));
+          else finish(resolve, response);
         });
+        if (pending && typeof pending.then === 'function') {
+          pending.then(
+            response => finish(resolve, response),
+            error => finish(reject, error instanceof Error ? error : new Error(String(error?.message || error)))
+          );
+        }
       } catch (error) {
-        reject(error);
+        finish(reject, error);
       }
     });
   }
@@ -1811,7 +1831,10 @@
   }
 
   function openOptions() {
-    chrome.tabs.create({ url: chrome.runtime.getURL('options.html') }).catch(() => {});
+    // `chrome.tabs` is not exposed to content scripts on Chrome or Firefox.
+    // Delegate to the background page, whose 'open-options' handler already
+    // contains the Safari fallback for openOptionsPage().
+    sendMessage({ type: 'open-options' }).catch(() => {});
   }
 
   function dockPosition() {

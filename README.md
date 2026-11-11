@@ -16,11 +16,26 @@
 
 > Safari 的原生扩展不能直接加载 `.user.js`，Tampermonkey 是最省事的安装方式。
 
-### 方式二：浏览器扩展（Chrome / Edge / Safari App Extension）
+### 方式二：浏览器扩展（Chrome / Edge / Firefox / Safari App Extension）
+
+**Chrome / Edge**
 
 1. 打开 `chrome://extensions`（Edge 为 `edge://extensions`），开启「开发者模式」。
 2. 选择「加载已解压的扩展程序」，指向仓库中的 [`extension/`](extension/) 目录。
 3. 点击工具栏图标打开快捷面板，或右键图标 →「选项」进入完整设置页。
+
+**Firefox 128+**
+
+Release 提供 `*-firefox.xpi` / `*-firefox.zip`（未签名），以及配置 AMO 凭证后额外产出的 `*-firefox-signed.xpi`（已签名，正式版 Firefox 可直接安装）。它们由 [`scripts/build-firefox.mjs`](scripts/build-firefox.mjs) 从同一份 `extension/` 源码生成，文件清单与 Chrome 包完全一致，只有 `manifest.json` 不同：Firefox 不支持 `background.service_worker`，改用 `background.scripts` 事件页（`type: "module"` 保留 ESM import），并补上 `browser_specific_settings.gecko`。因此**不能直接把 `extension/` 目录加载进 Firefox**。
+
+未签名包（临时加载）：
+
+1. 下载 `*-firefox.zip` 并解压（或本地执行 `node scripts/build-firefox.mjs` 自行生成）。
+2. 打开 `about:debugging#/runtime/this-firefox` →「临时加载附加组件」，选择解压目录中的 `manifest.json`（也可直接选 `.xpi`）。
+3. 安装弹窗里允许 `http://*/*`、`https://*/*` 的站点权限，否则内容脚本不会注入。
+4. 这种加载方式在浏览器重启后失效。
+
+签名包：直接打开 `*-firefox-signed.xpi` 即可在正式版 Firefox 中安装。签名版由 workflow 用 `web-ext sign` 生成，凭证配置见下方「打包与发布」一节。若只想在 Firefox 上用、不想装扩展，方式一的 Tampermonkey 脚本同样可用。
 
 Safari 14+ 可用 Xcode 的 **Safari Web Extension Converter** 导入 `extension/` 目录后签名运行。打包时请确认「Website Access」允许目标站点。
 
@@ -154,12 +169,43 @@ YouTube 等站点会发送 `Content-Security-Policy: require-trusted-types-for '
 - 所有设置与密钥保存在浏览器本地（扩展为 `chrome.storage.local`，脚本为 GM 存储），仅本机可读。
 - 翻译缓存只保存译文与指纹，不保存原文，且不写入磁盘（`chrome.storage.session` / `sessionStorage`），关闭浏览器即消失。
 
+## 打包与发布（GitHub Actions）
+
+[`.github/workflows/pack-crx.yml`](.github/workflows/pack-crx.yml) 在推送 `main`、打任意 tag 或手动触发时构建；打 tag 时还会把产物挂到同名 GitHub Release。每次产出：
+
+| 产物 | 说明 |
+| --- | --- |
+| `*.crx` / `*.zip` | Chrome / Edge，`.crx` 用 RSA 密钥签名 |
+| `*-firefox.xpi` / `*-firefox.zip` | Firefox MV3 扩展，未签名 |
+| `*-firefox-signed.xpi` | AMO 签名版，仅在配置了 JWT 凭证且签名成功时出现 |
+| `open-translate.user.js` | 油猴脚本 |
+| `SHA256SUMS.txt` | 以上全部产物的校验和 |
+
+### 仓库 Secrets
+
+| Secret | 用途 | 不配置的后果 |
+| --- | --- | --- |
+| `CRX_PRIVATE_KEY` | Chrome `.crx` 签名私钥（PEM 的 base64），用于固定扩展 ID | 每次构建临时生成密钥，扩展 ID 会变 |
+| `AMO_JWT_ISSUE` | AMO 开发者后台的 **JWT Issuer**，传给 `web-ext sign --api-key` | 跳过 AMO 签名，只发布未签名 XPI |
+| `AMO_JWT_SECRET` | AMO 开发者后台的 **JWT Secret**，传给 `--api-secret` | 同上 |
+
+> JWT 凭证在 [addons.mozilla.org 开发者中心](https://addons.mozilla.org/developers/addon/api/key/) 生成。该字段官方叫 JWT **Issuer**；workflow 也兼容把 Secret 存成 `AMO_JWT_ISSUER`。
+
+**当前状态：AMO 凭证尚未申请下来**，所以现在打 tag 只会发布未签名 XPI，构建不会失败，日志里会显示「跳过 AMO 签名」的提示。凭证配好后无需改 workflow，下次打 tag 会自动签名。
+
+签名的几个约定：
+
+- 只在 **tag 构建**执行，日常 `main` 提交不会向 AMO 提交版本。
+- 使用 `--channel unlisted`：不进入 AMO 商店公开列表，只取回可自行分发的签名包。若要上架公开列表，把 workflow 里的 `--channel` 改为 `listed`（届时还需补齐商店元数据并通过审核）。
+- AMO 不允许同一 add-on 重复提交同一版本号。重跑同一 tag 前请先升 `extension/manifest.json` 的版本号；签名失败也不会阻断其余产物发布。
+- 缺凭证、AMO 报错、签名结果异常（缺少 `META-INF` 签名块）都只产生 notice / warning，Release 与 Artifacts 照常发布，构建摘要里会写明签名状态。
+
 ## 项目结构
 
 ```
 extension/
   manifest.json         MV3 清单
-  background.js         service worker：引擎调度、缓存、脱敏
+  background.js         后台入口（Chrome service worker / Firefox 事件页）：引擎调度、缓存、脱敏
   content.js            页面扫描、批量队列、译文渲染、视频字幕
   content.css           译文样式与悬浮控件
   options.html/.css/.js 完整设置页
@@ -170,6 +216,9 @@ extension/
   lib/privacy.js        敏感信息脱敏
   lib/cache.js          会话级译文缓存（内存 + chrome.storage.session）
   lib/store.js          设置读写与旧版本迁移
+  lib/webext.js         chrome / browser 命名空间兜底
+scripts/
+  build-firefox.mjs    由 extension/ 生成 Firefox MV3 包（.xpi / .zip）
 tampermonkey/
   open-translate.user.js  单文件用户脚本（内含同款设置面板）
 ```

@@ -1,5 +1,12 @@
-name: Pack CRX
+name: Pack CRX & XPI
 
+# 推送 main / 打 tag 时，从同一份 extension/ 源码产出：
+#   - Chrome / Edge : .crx（带签名）+ .zip
+#   - Firefox       : .xpi（未签名）+ .zip，Firefox manifest 由 scripts/build-firefox.mjs 生成
+#   - 油猴脚本      : open-translate.user.js
+# 打 tag 且配置了 AMO JWT 凭证时，额外用 web-ext sign 产出 -firefox-signed.xpi（可直装正式版 Firefox）；
+# 凭证未配置或签名失败时跳过，其余产物照常发布，不会让构建失败。
+# 全部产物进 Actions Artifacts；打 tag 时还会作为资源挂到同名 GitHub Release。
 
 on:
   push:
@@ -149,7 +156,8 @@ jobs:
             console.log("CRX3 自检通过，扩展 ID " + got + "，载荷 " + zip.length + " 字节");
           '
 
-          ( cd dist && sha256sum *.crx *.zip | tee SHA256SUMS.txt )
+          # 显式列出 Chrome 产物，避免后续 Firefox 产物被通配符误算进来
+          ( cd dist && sha256sum "$BASE.crx" "$BASE.zip" | tee SHA256SUMS.txt )
 
       - name: Include userscript
         run: |
@@ -159,6 +167,79 @@ jobs:
           node --check tampermonkey/open-translate.user.js || { echo "::error::open-translate.user.js 语法错误"; exit 1; }
           ( cd dist && sha256sum open-translate.user.js >> SHA256SUMS.txt )
           echo "已附带 open-translate.user.js 到 dist/"
+
+      - name: Pack Firefox XPI and ZIP
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          set -euo pipefail
+          # 同一份源码，换成 Firefox MV3 manifest（background.scripts + gecko 设置）后打包。
+          # 脚本自带 zip 完整性、条目清单、manifest 字段自检。
+          node scripts/build-firefox.mjs
+          ( cd dist && sha256sum "open-translate-${VERSION}-firefox.xpi" "open-translate-${VERSION}-firefox.zip" >> SHA256SUMS.txt )
+          echo "Firefox 产物已加入 SHA256SUMS.txt"
+
+      - name: Sign Firefox XPI with AMO
+        id: amo
+        if: github.ref_type == 'tag'
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+          # AMO 开发者后台的字段名是 JWT Issuer / JWT Secret；这里同时兼容官方拼写 AMO_JWT_ISSUER。
+          AMO_JWT_ISSUE: ${{ secrets.AMO_JWT_ISSUE || secrets.AMO_JWT_ISSUER }}
+          AMO_JWT_SECRET: ${{ secrets.AMO_JWT_SECRET }}
+        run: |
+          set -euo pipefail
+          # 签名是可选的发布增强：缺凭证、AMO 报错、结果异常都不阻断其余产物发布。
+          finish() {
+            echo "signed=$1" >> "$GITHUB_OUTPUT"
+            echo "note=$2" >> "$GITHUB_OUTPUT"
+            exit 0
+          }
+          if [ -z "${AMO_JWT_ISSUE:-}" ] || [ -z "${AMO_JWT_SECRET:-}" ]; then
+            echo "::notice title=跳过 AMO 签名::仓库 Secrets 里没有 AMO_JWT_ISSUE / AMO_JWT_SECRET，本次只发布未签名的 Firefox XPI。"
+            finish false "凭证未配置，跳过签名（仅发布未签名 XPI）"
+          fi
+
+          # web-ext sign 只接受解包目录，从本轮生成的 XPI 还原，保证签的与发布的是同一份 manifest
+          # （含 gecko id 与 data_collection_permissions）。
+          WORK="$(mktemp -d)"
+          trap 'if [ -n "${WORK:-}" ]; then rm -rf -- "$WORK"; fi' EXIT
+          mkdir -p "$WORK/source" "$WORK/artifacts"
+          unzip -q "dist/open-translate-${VERSION}-firefox.xpi" -d "$WORK/source"
+
+          # unlisted = 不进 AMO 商店列表，只取回可自行分发的签名包；要上架公开列表改成 listed。
+          # 凭证只在运行时由 env 传入，workflow 文件里不存明文，日志里 GitHub 会自动 mask。
+          if ! npx --yes web-ext@8 sign \
+            --source-dir "$WORK/source" \
+            --artifacts-dir "$WORK/artifacts" \
+            --api-key "$AMO_JWT_ISSUE" \
+            --api-secret "$AMO_JWT_SECRET" \
+            --channel unlisted \
+            --timeout 900000 \
+            --no-input; then
+            echo "::warning title=AMO 签名失败::不阻断发布，本次仍会上传未签名的 Firefox XPI。"
+            finish false "AMO 签名失败（详见本步骤日志），已保留未签名 XPI"
+          fi
+
+          SIGNED="$(find "$WORK/artifacts" -type f -name '*.xpi' -print -quit)"
+          ENTRIES=""
+          if [ -n "$SIGNED" ]; then ENTRIES="$(unzip -Z1 "$SIGNED" 2>/dev/null || true)"; fi
+          # AMO 签过的包必带 META-INF 签名块；没有就说明拿到的仍是未签名构建产物。
+          case "$ENTRIES" in
+            *"META-INF/"*) ;;
+            *)
+              echo "::warning title=签名结果异常::未找到带 META-INF 的已签名 XPI，跳过发布签名包。"
+              finish false "签名结果异常（缺少 META-INF），已保留未签名 XPI"
+              ;;
+          esac
+
+          TARGET="open-translate-${VERSION}-firefox-signed.xpi"
+          cp "$SIGNED" "dist/$TARGET"
+          unzip -t "dist/$TARGET" >/dev/null
+          ( cd dist && sha256sum "$TARGET" >> SHA256SUMS.txt )
+          echo "AMO 签名完成：${TARGET}"
+          echo "dist/*.xpi 会一并上传，SHA256SUMS.txt 已追加该文件的校验和。"
+          finish true "已签名（unlisted 渠道），可直接安装到正式版 Firefox"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -177,22 +258,27 @@ jobs:
           EXT_ID: ${{ steps.key.outputs.ext_id }}
           KEY_SOURCE: ${{ steps.key.outputs.source }}
           COMMIT: ${{ github.sha }}
+          AMO_NOTE: ${{ steps.amo.outputs.note }}
         run: |
           set -euo pipefail
+          AMO_NOTE="${AMO_NOTE:-未执行签名（仅 tag 构建触发）}"
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "Release $TAG 已存在，追加/覆盖资源"
-            gh release upload "$TAG" dist/*.crx dist/*.zip dist/SHA256SUMS.txt dist/open-translate.user.js --clobber
+            gh release upload "$TAG" dist/*.crx dist/*.zip dist/*.xpi dist/SHA256SUMS.txt dist/open-translate.user.js --clobber
           else
             NOTES="Open-Translate v$VERSION
             扩展 ID: $EXT_ID
             签名密钥来源: $KEY_SOURCE
+            Firefox AMO 签名: $AMO_NOTE
             提交: $COMMIT
             下载:
             - .crx 签名安装包（Chrome 对非商店来源 .crx 有策略限制，装不上时请用 .zip）
             - .zip 开发者模式解压加载 / 上架用
+            - *-firefox-signed.xpi AMO 签名版（配置了 JWT 凭证后才有，可直接安装到正式版 Firefox）
+            - *-firefox.xpi / *-firefox.zip 未签名 Firefox 扩展（about:debugging 临时加载）
             - open-translate.user.js 油猴脚本（Firefox / 篡改猴 / Violentmonkey，免应用商店）
             - SHA256SUMS.txt 校验和"
-            gh release create "$TAG" dist/*.crx dist/*.zip dist/SHA256SUMS.txt dist/open-translate.user.js \
+            gh release create "$TAG" dist/*.crx dist/*.zip dist/*.xpi dist/SHA256SUMS.txt dist/open-translate.user.js \
               --title "Open-Translate v$VERSION" \
               --notes "$NOTES"
           fi
@@ -206,9 +292,13 @@ jobs:
           REF_TYPE: ${{ github.ref_type }}
           REF_NAME: ${{ github.ref_name }}
           COMMIT: ${{ github.sha }}
+          AMO_SIGNED: ${{ steps.amo.outputs.signed }}
+          AMO_NOTE: ${{ steps.amo.outputs.note }}
         run: |
           # 所有值都走 env：Action 表达式占位符会在交给 shell 之前先做文本替换；
           # 若直接把变量内联进脚本，值里的反引号 / $() 会被 shell 当成命令执行（tag 名允许带反引号），所以这里统一用 env 注入。
+          AMO_NOTE="${AMO_NOTE:-未执行（仅 tag 构建触发 AMO 签名）}"
+          AMO_SIGNED="${AMO_SIGNED:-false}"
           if [ "$KEY_SOURCE" = "secret" ]; then
             KEY_NOTE="仓库 Secret CRX_PRIVATE_KEY"
           else
@@ -222,10 +312,17 @@ jobs:
             echo "| 版本 | \`${VERSION}\` |"
             echo "| 扩展 ID | \`${EXT_ID}\` |"
             echo "| 签名密钥 | ${KEY_NOTE} |"
+            echo "| Firefox AMO 签名 | ${AMO_NOTE} |"
             echo "| 触发 | ${REF_TYPE} ${REF_NAME} |"
             echo "| 提交 | \`${COMMIT}\` |"
             echo ""
-            echo "产物：\`.crx\`（签名安装包）、\`.zip\`（开发者模式加载解压 / 上架用）、\`SHA256SUMS.txt\`，另有 \`open-translate.user.js\` 油猴脚本。Chrome 对非商店来源的 .crx 有策略限制，装不上时解压 .zip 用「加载已解压的扩展程序」。"
+            echo "产物：\`.crx\` + \`.zip\`（Chrome / Edge）、\`*-firefox.xpi\` + \`*-firefox.zip\`（Firefox MV3，未签名）、\`*-firefox-signed.xpi\`（AMO 签名版，有凭证时才有）、\`open-translate.user.js\`（油猴脚本）、\`SHA256SUMS.txt\`。"
+            echo "Chrome 对非商店来源的 .crx 有策略限制，装不上时解压 .zip 用「加载已解压的扩展程序」。"
+            if [ "$AMO_SIGNED" = "true" ]; then
+              echo "Firefox：优先用 \`*-firefox-signed.xpi\`（AMO 已签名，正式版 Firefox 可直接安装）；未签名的 \`-firefox.xpi\` / \`-firefox.zip\` 仅供 about:debugging 临时加载。"
+            else
+              echo "Firefox 的 .xpi 未签名，请用 about:debugging 的「临时加载附加组件」；配置仓库 Secrets \`AMO_JWT_ISSUE\` / \`AMO_JWT_SECRET\` 后，打 tag 会自动产出可直装的签名版。"
+            fi
             echo ""
             echo '```'
             cat dist/SHA256SUMS.txt

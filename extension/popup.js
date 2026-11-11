@@ -1,3 +1,4 @@
+import './lib/webext.js';
 import { LANGUAGES } from './lib/defaults.js';
 import { ENGINE_CATALOG } from './lib/catalog.js';
 import { loadSettings, saveSettings } from './lib/store.js';
@@ -91,20 +92,21 @@ function bind() {
   $('#open-options').addEventListener('click', () => {
     const openOptionsSafe = () => {
       try {
-        chrome.tabs.create({ url: chrome.runtime.getURL('options.html') });
+        const pending = chrome.tabs.create({ url: chrome.runtime.getURL('options.html') });
+        if (pending && typeof pending.catch === 'function') pending.catch(() => {});
       } catch {
         /* last-resort: Safari sometimes blocks tab creation from popup */
       }
     };
-    // chrome.runtime.openOptionsPage() is unreliable in Safari Web Extensions;
-    // opening the options page as a normal tab is the robust path.
+    // openOptionsPage() is unreliable in Safari Web Extensions, and its
+    // callback form is not portable to Firefox (which rejects the returned
+    // Promise instead). Use the Promise form plus a Safari-specific tab path.
     try {
-      if (typeof chrome.runtime.openOptionsPage === 'function') {
-        chrome.runtime.openOptionsPage(() => {
-          if (chrome.runtime.lastError) openOptionsSafe();
-        });
-      } else {
+      if (IS_SAFARI || typeof chrome.runtime.openOptionsPage !== 'function') {
         openOptionsSafe();
+      } else {
+        const pending = chrome.runtime.openOptionsPage();
+        if (pending && typeof pending.catch === 'function') pending.catch(openOptionsSafe);
       }
     } catch {
       openOptionsSafe();
