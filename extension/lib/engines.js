@@ -8,6 +8,49 @@ import { formatGlossary } from './glossary.js';
 
 const TIMEOUT = 25000;
 
+// FluentRead-style batching: bound every request by BOTH segment count and
+// character count. Exceeding either limit starts another sub-batch; an
+// oversized single segment stays intact (never truncated). Small sub-batches
+// run concurrently, so a long page never becomes one giant slow request that
+// blows the caller's deadline.
+const MAX_BATCH_SEGMENTS = 8;
+const MAX_BATCH_CHARS = 2000;
+const MAX_BATCH_CONCURRENCY = 3;
+const MAX_SEGMENT_CONCURRENCY = 4;
+
+function splitBatches(texts, maxSegments = MAX_BATCH_SEGMENTS, maxChars = MAX_BATCH_CHARS) {
+  const batches = [];
+  let current = [];
+  let chars = 0;
+  for (const text of texts) {
+    const length = String(text ?? '').length;
+    if (current.length && (current.length >= maxSegments || chars + length > maxChars)) {
+      batches.push(current);
+      current = [];
+      chars = 0;
+    }
+    current.push(text);
+    chars += length;
+  }
+  if (current.length) batches.push(current);
+  return batches;
+}
+
+// Bounded parallelism that preserves input order.
+async function mapConcurrent(items, limit, worker) {
+  const results = new Array(items.length);
+  let cursor = 0;
+  const runners = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    for (;;) {
+      const index = cursor++;
+      if (index >= items.length) return;
+      results[index] = await worker(items[index], index);
+    }
+  });
+  await Promise.all(runners);
+  return results;
+}
+
 async function http(url, options = {}, timeout = TIMEOUT) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeout);
@@ -80,19 +123,19 @@ async function googleOne(text, target) {
 
 const google = {
   id: 'google',
-  async translate({ texts, target }) {
-    const output = [];
-    for (const text of texts) output.push(await googleOne(text, target));
-    return output;
+  translate({ texts, target }) {
+    // Previously one request at a time; a long page then took N round trips.
+    return mapConcurrent(texts, MAX_SEGMENT_CONCURRENCY, text => googleOne(text, target));
   }
 };
 
 const mymemory = {
   id: 'mymemory',
-  async translate({ texts, source, target }) {
+  translate({ texts, source, target }) {
     const sourceLang = mymemoryLang(source);
-    const output = [];
-    for (const text of texts) {
+    // MyMemory's free tier rate-limits aggressively, so keep a low fan-out and
+    // the inter-request pause, but still overlap two segments at a time.
+    return mapConcurrent(texts, 2, async text => {
       const url =
         'https://api.mymemory.translated.net/get?q=' +
         encodeURIComponent(text.slice(0, 500)) +
@@ -102,10 +145,10 @@ const mymemory = {
         encodeURIComponent(target);
       const data = await http(url);
       if (data?.responseStatus !== 200) throw new Error(data?.responseDetails || 'MyMemory 服务不可用');
-      output.push(data.responseData.translatedText);
+      const value = data.responseData.translatedText;
       await sleep(120);
-    }
-    return output;
+      return value;
+    });
   }
 };
 
@@ -214,11 +257,8 @@ async function bingTranslateOne(text, to, credentials) {
 
 async function microsoftFree(texts, target) {
   const to = msLang(target);
-  const run = async credentials => {
-    const output = [];
-    for (const text of texts) output.push(await bingTranslateOne(text, to, credentials));
-    return output;
-  };
+  const run = credentials =>
+    mapConcurrent(texts, MAX_SEGMENT_CONCURRENCY, text => bingTranslateOne(text, to, credentials));
   try {
     return await run(await fetchBingCredentials());
   } catch (error) {
@@ -383,14 +423,22 @@ function cleanSingle(raw) {
 }
 
 async function runAi(ask, { texts, source, target, config }) {
-  if (texts.length === 1) return [cleanSingle(await ask(buildPrompt({ texts, source, target, config })))];
-  const batch = await ask(buildPrompt({ texts, source, target, config }));
-  const parsed = parseNumbered(batch, texts.length);
-  if (parsed) return parsed;
-  // The model ignored the numbering contract — fall back to one request per segment.
-  const output = [];
-  for (const text of texts) output.push(cleanSingle(await ask(buildPrompt({ texts: [text], source, target, config }))));
-  return output;
+  const promptOf = list => buildPrompt({ texts: list, source, target, config });
+  if (texts.length === 1) return [cleanSingle(await ask(promptOf(texts)))];
+  const parsed = parseNumbered(await ask(promptOf(texts)), texts.length);
+  if (parsed) {
+    // Keep every good segment; only re-request the empty slots instead of
+    // discarding the whole batch (FluentRead: partial repair, not full replay).
+    const missing = parsed.map((value, index) => (value ? -1 : index)).filter(index => index >= 0);
+    if (!missing.length) return parsed;
+    const repaired = await mapConcurrent(missing, 3, index =>
+      ask(promptOf([texts[index]])).then(cleanSingle));
+    missing.forEach((index, position) => { parsed[index] = repaired[position]; });
+    return parsed;
+  }
+  // The model ignored the numbering contract. Retry per segment concurrently —
+  // N sequential retries multiplied latency and all but guaranteed a timeout.
+  return mapConcurrent(texts, 3, text => ask(promptOf([text])).then(cleanSingle));
 }
 
 async function openAiChat({ texts, source, target, config }) {
@@ -642,7 +690,12 @@ export async function translateTexts({ engine, texts, source = 'auto', target, c
       source,
       target,
       config: settings.engines?.[id] || {}
-    }).then(result => ({ result, id })));
+    }).then(result => {
+      // In racing mode a partially empty result must not beat an engine that
+      // actually translated everything.
+      if (result.some(value => !value)) throw new Error('引擎返回不完整译文');
+      return { result, id };
+    }));
     if (!attempts.length) throw new Error('没有可用的翻译引擎');
     try {
       return (await Promise.any(attempts)).result;
@@ -653,6 +706,23 @@ export async function translateTexts({ engine, texts, source = 'auto', target, c
   const provider = PROVIDERS[engine];
   if (!provider) throw new Error(`未知的翻译引擎：${engine}`);
   if (!Array.isArray(texts) || !texts.length) return [];
-  const output = await provider.translate({ texts, source, target, config });
-  return texts.map((_, index) => String(output[index] ?? ''));
+  // Isolate failures per sub-batch: one slow/failed request must not discard
+  // translations that already succeeded elsewhere on the same page.
+  const runBatch = async batch => {
+    try {
+      const output = await provider.translate({ texts: batch, source, target, config });
+      return { ok: true, values: batch.map((_, index) => String(output[index] ?? '')) };
+    } catch (error) {
+      return { ok: false, error, size: batch.length };
+    }
+  };
+  const batches = splitBatches(texts);
+  const groups = batches.length === 1
+    ? [await runBatch(batches[0])]
+    : await mapConcurrent(batches, MAX_BATCH_CONCURRENCY, runBatch);
+  // Surface a real error (bad key, network down) only when nothing worked.
+  // Otherwise return empty strings for the failed slots; the cache layer skips
+  // falsy values, so incomplete results are never cached.
+  if (groups.every(group => !group.ok)) throw groups[0]?.error || new Error('翻译失败');
+  return groups.flatMap(group => group.ok ? group.values : Array(group.size).fill(''));
 }

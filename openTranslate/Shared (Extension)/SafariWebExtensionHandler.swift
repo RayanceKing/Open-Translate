@@ -10,6 +10,7 @@ import os.log
 import Foundation
 import Security
 import Translation
+import NaturalLanguage
 import SwiftUI
 #if os(iOS)
 import UIKit
@@ -137,11 +138,17 @@ class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
         private let target: String
         private let completion: (Result<[String], Error>) -> Void
         private var host: TranslationHostController?
+        private var finished = false
+        private var watchdog: Task<Void, Never>?
         #if os(iOS)
         private var window: UIWindow?
         #else
         private var window: NSWindow?
         #endif
+
+        // Below the JS-side 25s timeout, so every window is torn down before
+        // the caller gives up even if the framework never calls back.
+        private static let timeoutSeconds: Int = 20
 
         init(texts: [String], source: String?, target: String, completion: @escaping (Result<[String], Error>) -> Void) {
             self.texts = texts
@@ -151,14 +158,19 @@ class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
         }
 
         func start() {
+            // Apple's Translation framework presents a system "cannot detect
+            // the language / choose a source language" panel when
+            // Configuration.source is nil and auto-detection is uncertain
+            // (WWDC24, "Meet the Translation API"). Inside a Safari app
+            // extension that panel has no dismissible host window: it stays on
+            // screen, cannot be interacted with, and one is created per batch.
+            // Always supply an explicit source language instead.
             let configuration = TranslationSession.Configuration(
-                source: source.flatMap { $0 == "auto" ? nil : Locale.Language(identifier: $0) },
+                source: Self.resolveSourceLanguage(requested: source, texts: texts),
                 target: Locale.Language(identifier: target)
             )
             let view = TranslationTaskView(configuration: configuration, texts: texts) { [weak self] result in
-                guard let self else { return }
-                completion(result)
-                stop()
+                self?.finish(result)
             }
             let controller = TranslationHostController(rootView: view)
             host = controller
@@ -169,10 +181,49 @@ class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
             self.window = window
             #else
             let window = NSWindow(contentViewController: controller)
-            window.setFrame(NSRect(x: 0, y: 0, width: 1, height: 1), display: false)
+            // SwiftUI needs the view inside a window for .translationTask, but
+            // the window must never appear on screen (frame (0,0) on macOS is
+            // the bottom-left corner — exactly where the panels piled up).
+            window.setFrame(NSRect(x: -20000, y: -20000, width: 1, height: 1), display: false)
+            window.isOpaque = false
+            window.backgroundColor = .clear
+            window.ignoresMouseEvents = true
+            window.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle]
             window.orderFrontRegardless()
             self.window = window
             #endif
+
+            watchdog = Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .seconds(Self.timeoutSeconds))
+                guard let self, !self.finished else { return }
+                self.finish(.failure(NSError(
+                    domain: "com.stuwang.openTranslate.translation",
+                    code: -1,
+                    userInfo: [NSLocalizedDescriptionKey: "系统翻译超时，请确认已下载对应语言包，或在设置中显式指定原文语言"]
+                )))
+            }
+        }
+
+        /// Never returns nil. An explicit user choice wins; otherwise detect
+        /// with NLLanguageRecognizer — Apple's recommended way to derive a
+        /// Locale.Language without asking the framework to auto-detect.
+        private static func resolveSourceLanguage(requested: String?, texts: [String]) -> Locale.Language {
+            if let requested, !requested.isEmpty, requested != "auto" {
+                return Locale.Language(identifier: requested)
+            }
+            let sample = String(texts.joined(separator: "\n").prefix(4000))
+            let recognizer = NLLanguageRecognizer()
+            recognizer.processString(sample)
+            return Locale.Language(identifier: recognizer.dominantLanguage?.rawValue ?? "en")
+        }
+
+        private func finish(_ result: Result<[String], Error>) {
+            guard !finished else { return }
+            finished = true
+            watchdog?.cancel()
+            watchdog = nil
+            completion(result)
+            stop()
         }
 
         private func stop() {
@@ -191,22 +242,18 @@ class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
         let configuration: TranslationSession.Configuration
         let texts: [String]
         let completion: (Result<[String], Error>) -> Void
-        @State private var completed = false
 
         var body: some View {
             Color.clear
                 .frame(width: 1, height: 1)
                 .translationTask(configuration) { session in
-                    guard !completed else { return }
                     do {
                         var values: [String] = []
                         for text in texts {
                             values.append(try await session.translate(text).targetText)
                         }
-                        completed = true
                         completion(.success(values))
                     } catch {
-                        completed = true
                         completion(.failure(error))
                     }
                 }

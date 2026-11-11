@@ -106,7 +106,11 @@
 
   const clean = text => String(text || '').replace(/\s+/g, ' ').trim();
   const translationText = text => String(text || '').replace(/\u00a0/g, ' ').trim();
-  const TRANSLATION_TIMEOUT = 12000;
+  // Must exceed the engine layer's 25s HTTP timeout. A 12s deadline used to
+  // kill valid requests before the provider could possibly answer.
+  const TRANSLATION_TIMEOUT = 30000;
+  const MAX_BATCH_SEGMENTS = 8;
+  const MAX_BATCH_CHARS = 2000;
 
   function withTranslationTimeout(promise) {
     return Promise.race([
@@ -407,11 +411,34 @@
     queue.sort((a, b) => tops.get(a) - tops.get(b));
   }
 
+  // Bound a batch by blocks, segments AND characters. One block can hold many
+  // segments, so block count alone let a single request grow to tens of
+  // thousands of characters and time out (FluentRead-style double cap).
+  function takeBatch() {
+    const maxBlocks = Math.max(1, settings.batchSize);
+    const batch = [];
+    let segments = 0;
+    let chars = 0;
+    while (queue.length) {
+      const item = queue[0];
+      const count = item.segments.length;
+      const length = item.segments.reduce((total, text) => total + String(text).length, 0);
+      if (batch.length && (batch.length >= maxBlocks || segments + count > MAX_BATCH_SEGMENTS
+          || chars + length > MAX_BATCH_CHARS)) break;
+      queue.shift();
+      batch.push(item);
+      segments += count;
+      chars += length;
+    }
+    return batch;
+  }
+
   function pump() {
     if (!active) return;
     prioritize();
     while (inflight < settings.concurrency && queue.length) {
-      const batch = queue.splice(0, Math.max(1, settings.batchSize));
+      const batch = takeBatch();
+      if (!batch.length) break;
       inflight += 1;
       const segments = batch.flatMap(item => item.segments);
       withTranslationTimeout(requestTranslation(segments))

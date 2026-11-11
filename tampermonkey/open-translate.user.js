@@ -488,7 +488,9 @@ function protectGlossary(texts, entries) {
 
   const clean = text => String(text || '').replace(/\s+/g, ' ').trim();
   const translationText = text => String(text || '').replace(/\u00a0/g, ' ').trim();
-  const TRANSLATION_TIMEOUT = 12000;
+  // Must exceed the engine layer's 25s HTTP timeout. A 12s deadline used to
+  // kill valid requests before the provider could possibly answer.
+  const TRANSLATION_TIMEOUT = 30000;
 
   function withTranslationTimeout(promise) {
     return Promise.race([
@@ -645,12 +647,21 @@ function protectGlossary(texts, entries) {
   const unwrap = raw => String(raw).replace(/^\s*<<<\s*/, '').replace(/\s*>>>\s*$/, '').replace(/^["'“”]([\s\S]*)["'“”]$/, '$1').trim();
 
   async function runAi(ask, texts, target, config) {
-    if (texts.length === 1) return [unwrap(await ask(buildPrompt(texts, target, config)))];
-    const parsed = parseNumbered(await ask(buildPrompt(texts, target, config)), texts.length);
-    if (parsed) return parsed;
-    const output = [];
-    for (const text of texts) output.push(unwrap(await ask(buildPrompt([text], target, config))));
-    return output;
+    const promptOf = list => buildPrompt(list, target, config);
+    if (texts.length === 1) return [unwrap(await ask(promptOf(texts)))];
+    const parsed = parseNumbered(await ask(promptOf(texts)), texts.length);
+    if (parsed) {
+      // Keep every good segment; only re-request the empty slots instead of
+      // discarding the whole batch (FluentRead: partial repair).
+      const missing = parsed.map((value, index) => (value ? -1 : index)).filter(index => index >= 0);
+      if (!missing.length) return parsed;
+      const repaired = await mapConcurrent(missing, 3, index =>
+        ask(promptOf([texts[index]])).then(unwrap));
+      missing.forEach((index, position) => { parsed[index] = repaired[position]; });
+      return parsed;
+    }
+    // Numbering contract broken: retry concurrently, not as N serial requests.
+    return mapConcurrent(texts, 3, text => ask(promptOf([text])).then(unwrap));
   }
 
   // Microsoft: free channel (same public endpoint the Bing translator page uses)
@@ -725,11 +736,8 @@ function protectGlossary(texts, entries) {
 
   async function microsoftFree(texts, target) {
     const to = { 'zh-CN': 'zh-Hans', 'zh-TW': 'zh-Hant' }[target] || target;
-    const run = async credentials => {
-      const output = [];
-      for (const text of texts) output.push(await bingTranslateOne(text, to, credentials));
-      return output;
-    };
+    const run = credentials =>
+      mapConcurrent(texts, MAX_SEGMENT_CONCURRENCY, text => bingTranslateOne(text, to, credentials));
     try {
       return await run(await bingCredentials());
     } catch (error) {
@@ -739,7 +747,70 @@ function protectGlossary(texts, entries) {
     }
   }
 
+  // FluentRead-style batching: bound every request by BOTH segment count and
+  // character count; oversized single segments stay intact. Small sub-batches
+  // run concurrently so a long page never becomes one giant, slow request.
+  const MAX_BATCH_SEGMENTS = 8;
+  const MAX_BATCH_CHARS = 2000;
+  const MAX_BATCH_CONCURRENCY = 3;
+  const MAX_SEGMENT_CONCURRENCY = 4;
+
+  function splitBatches(texts, maxSegments = MAX_BATCH_SEGMENTS, maxChars = MAX_BATCH_CHARS) {
+    const batches = [];
+    let current = [];
+    let chars = 0;
+    for (const text of texts) {
+      const length = String(text ?? '').length;
+      if (current.length && (current.length >= maxSegments || chars + length > maxChars)) {
+        batches.push(current);
+        current = [];
+        chars = 0;
+      }
+      current.push(text);
+      chars += length;
+    }
+    if (current.length) batches.push(current);
+    return batches;
+  }
+
+  // Bounded parallelism that preserves input order.
+  async function mapConcurrent(items, limit, worker) {
+    const results = new Array(items.length);
+    let cursor = 0;
+    const runners = Array.from({ length: Math.min(limit, items.length) }, async () => {
+      for (;;) {
+        const index = cursor++;
+        if (index >= items.length) return;
+        results[index] = await worker(items[index], index);
+      }
+    });
+    await Promise.all(runners);
+    return results;
+  }
+
   async function translateBatch(texts, target, config) {
+    if (!Array.isArray(texts) || !texts.length) return [];
+    // Isolate failures per sub-batch: one slow request must not discard
+    // translations that already succeeded elsewhere on the page.
+    const runBatch = async batch => {
+      try {
+        const out = await translateBatchOnce(batch, target, config);
+        return { ok: true, values: batch.map((_, index) => String(out[index] ?? '')) };
+      } catch (error) {
+        return { ok: false, error, size: batch.length };
+      }
+    };
+    const batches = splitBatches(texts);
+    const groups = batches.length === 1
+      ? [await runBatch(batches[0])]
+      : await mapConcurrent(batches, MAX_BATCH_CONCURRENCY, runBatch);
+    // Only surface a hard error when nothing worked; otherwise leave empty
+    // slots. The cache layer skips falsy values, so partial results are safe.
+    if (groups.every(group => !group.ok)) throw groups[0]?.error || new Error('翻译失败');
+    return groups.flatMap(group => group.ok ? group.values : Array(group.size).fill(''));
+  }
+
+  async function translateBatchOnce(texts, target, config) {
     const engine = config.engine;
     if (engine === 'auto') {
       const configured = config.engines || {};
@@ -753,9 +824,14 @@ function protectGlossary(texts, entries) {
       if (configured.custom?.baseUrl) ids.push('custom');
       if (!ids.length) throw new Error('没有可用的翻译引擎');
       try {
-        return await Promise.any(ids.map(id => translateBatch(texts, target, {
+        return await Promise.any(ids.map(id => translateBatchOnce(texts, target, {
           ...config,
           engine: id
+        }).then(result => {
+          // In racing mode a partially empty result must not beat an engine
+          // that actually translated everything.
+          if (result.some(value => !value)) throw new Error('引擎返回不完整译文');
+          return result;
         })));
       } catch {
         throw new Error('所有可用翻译引擎均翻译失败');
@@ -764,27 +840,26 @@ function protectGlossary(texts, entries) {
     const cfg = config.engines[engine] || {};
 
     if (engine === 'google') {
-      const output = [];
-      for (const text of texts) {
+      // Previously one request at a time; a long page then took N round trips.
+      return mapConcurrent(texts, MAX_SEGMENT_CONCURRENCY, async text => {
         const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=${encodeURIComponent(target)}&dt=t&q=${encodeURIComponent(text)}`;
         const data = await http({ url });
-        output.push((data?.[0] || []).map(segment => segment?.[0] || '').join(''));
-      }
-      return output;
+        return (data?.[0] || []).map(segment => segment?.[0] || '').join('');
+      });
     }
 
     if (engine === 'mymemory') {
       const source = String(config.sourceLanguage || 'en').trim();
       const sourceLang = !source || source.toLowerCase() === 'auto' ? 'en' : source;
-      const output = [];
-      for (const text of texts) {
+      // Free tier rate-limits aggressively: low fan-out, keep the pause.
+      return mapConcurrent(texts, 2, async text => {
         const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text.slice(0, 500))}&langpair=${encodeURIComponent(sourceLang)}%7C${encodeURIComponent(target)}`;
         const data = await http({ url });
         if (data?.responseStatus !== 200) throw new Error(data?.responseDetails || 'MyMemory 服务不可用');
-        output.push(data.responseData.translatedText);
+        const value = data.responseData.translatedText;
         await sleep(120);
-      }
-      return output;
+        return value;
+      });
     }
 
     if (engine === 'deepl') {
@@ -1950,11 +2025,34 @@ function protectGlossary(texts, entries) {
     queue.sort((a, b) => tops.get(a) - tops.get(b));
   }
 
+  // Bound a batch by blocks, segments AND characters. One block can hold many
+  // segments, so block count alone let a single request grow to tens of
+  // thousands of characters and time out (FluentRead-style double cap).
+  function takeBatch() {
+    const maxBlocks = Math.max(1, settings.batchSize);
+    const batch = [];
+    let segments = 0;
+    let chars = 0;
+    while (queue.length) {
+      const item = queue[0];
+      const count = item.segments.length;
+      const length = item.segments.reduce((total, text) => total + String(text).length, 0);
+      if (batch.length && (batch.length >= maxBlocks || segments + count > MAX_BATCH_SEGMENTS
+          || chars + length > MAX_BATCH_CHARS)) break;
+      queue.shift();
+      batch.push(item);
+      segments += count;
+      chars += length;
+    }
+    return batch;
+  }
+
   function pump() {
     if (!active) return;
     prioritize();
     while (inflight < settings.concurrency && queue.length) {
-      const batch = queue.splice(0, Math.max(1, settings.batchSize));
+      const batch = takeBatch();
+      if (!batch.length) break;
       inflight += 1;
       const segments = batch.flatMap(item => item.segments);
       withTranslationTimeout(requestTranslation(segments))
