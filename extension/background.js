@@ -1,5 +1,11 @@
 import { loadSettings } from './lib/store.js';
-import { translateTexts, visionOcrTranslate, VISION_ENGINES } from './lib/engines.js';
+import {
+  translateTexts,
+  visionOcrTranslate,
+  VISION_ENGINES,
+  detectModels,
+  installIndexTranslateHeaderRule
+} from './lib/engines.js';
 import { maskAll } from './lib/privacy.js';
 import { AI_ENGINES } from './lib/defaults.js';
 import { cacheKey, readCache, writeCache, clearCache, cacheStats } from './lib/cache.js';
@@ -117,6 +123,17 @@ async function handleTest({ engine }) {
   return sample;
 }
 
+// Model discovery for AI services. The options page passes the *draft* config
+// (live input values, which may not be flushed to storage yet); stored values
+// fill in anything the form does not expose.
+async function handleDetectModels({ engine, config: draft = {} }) {
+  if (!AI_ENGINES.includes(engine)) throw new Error('该翻译服务不支持模型检测');
+  const settings = await loadSettings();
+  const config = { ...(settings.engines[engine] || {}), ...(draft || {}) };
+  const models = await detectModels({ engine, config });
+  return { models };
+}
+
 // Image OCR + translation for manga mode. The content script sends the image as
 // a data URL; we hand it to a multimodal engine and return detected boxes.
 async function handleTranslateImage({ image, engine, source, target }, snapshot) {
@@ -148,6 +165,10 @@ chrome.runtime.onMessage.addListener((message, _sender, respond) => {
   }
   if (message?.type === 'test-engine') {
     handleTest(message).then(text => respond({ text })).catch(fail);
+    return true;
+  }
+  if (message?.type === 'detect-models') {
+    handleDetectModels(message).then(result => respond(result)).catch(fail);
     return true;
   }
   if (message?.type === 'cache-stats') {
@@ -182,6 +203,9 @@ chrome.commands?.onCommand.addListener(async command => {
 });
 
 chrome.runtime.onInstalled.addListener(() => {
+  // Best-effort fix for the B站 WAF's HTTP 412 on extension-origin requests.
+  // Dynamic rules persist across restarts; a missing DNR API is a no-op.
+  installIndexTranslateHeaderRule().catch(() => {});
   try {
     chrome.contextMenus.create({ id: 'ot-translate-selection', title: '翻译选中文本', contexts: ['selection'] });
   } catch {

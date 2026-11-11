@@ -119,7 +119,8 @@ export const DEFAULT_SETTINGS = {
     deepseek: { baseUrl: 'https://api.deepseek.com/v1', apiKey: '', model: 'deepseek-chat' },
     gemini: { apiKey: '', model: 'gemini-2.0-flash' },
     claude: { apiKey: '', model: 'claude-3-5-haiku-latest' },
-    custom: { name: '', baseUrl: '', apiKey: '', model: '' }
+    custom: { name: '', baseUrl: '', apiKey: '', model: '' },
+    indextranslate: { baseUrl: 'https://index-translate.bilibili.com/v1', apiKey: '', model: 'Index-Translate-35B-A3B' }
   },
   ai: {
     prompt: DEFAULT_PROMPT,
@@ -161,10 +162,13 @@ export const DEFAULT_SETTINGS = {
   }
 };
 
-export const AI_ENGINES = ['openai', 'deepseek', 'gemini', 'claude', 'custom'];
+// Index 翻译 leads the AI group everywhere (see ENGINE_PRIORITY in catalog.js).
+export const AI_ENGINES = ['indextranslate', 'openai', 'deepseek', 'gemini', 'claude', 'custom'];
 
-/** Engines that can read an image and return both OCR + translation in one call. */
-export const VISION_ENGINES = ['openai', 'gemini', 'claude'];
+/** Engines that can read an image and return both OCR + translation in one call.
+ *  Index-Translate natively supports OpenAI `image_url` input (its whole model
+ *  family ships a vision encoder), so it leads the manga-mode dropdown too. */
+export const VISION_ENGINES = ['indextranslate', 'openai', 'gemini', 'claude'];
 
 const isPlainObject = value => !!value && typeof value === 'object' && !Array.isArray(value);
 
@@ -189,7 +193,7 @@ export function normalizeSettings(raw) {
     String(raw.engines.microsoft.key || '').trim() !== '';
 
   const settings = mergeSettings(DEFAULT_SETTINGS, raw || {});
-  if (!['auto', 'google', 'mymemory', 'deepl', 'deeplx', 'microsoft', 'libre', 'apple', 'openai', 'deepseek', 'gemini', 'claude', 'custom'].includes(settings.engine)) {
+  if (!['auto', 'google', 'mymemory', 'deepl', 'deeplx', 'microsoft', 'libre', 'apple', 'openai', 'deepseek', 'gemini', 'claude', 'custom', 'indextranslate'].includes(settings.engine)) {
     settings.engine = DEFAULT_SETTINGS.engine;
   }
   settings.version = APP_VERSION;

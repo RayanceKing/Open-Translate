@@ -12,7 +12,7 @@
     "256": "images/icon-256.png",
     "512": "images/icon-512.png"
   },
-  "permissions": ["storage", "activeTab", "contextMenus", "nativeMessaging"],
+  "permissions": ["storage", "activeTab", "contextMenus", "nativeMessaging", "declarativeNetRequestWithHostAccess"],
   "host_permissions": ["http://*/*", "https://*/*"],
   "background": { "service_worker": "background.js", "type": "module" },
   "content_scripts": [

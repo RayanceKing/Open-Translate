@@ -308,19 +308,22 @@ function renderServices() {
       })
       .join('');
 
+    const canDetect = AI_ENGINES.includes(engine.id);
     return `<div class="service ${settings.engine === engine.id ? 'is-active' : ''}" data-service="${engine.id}">
       <div class="service-head">
         <span class="service-name">${serviceName}</span>
         <span class="tag ${engine.tag === 'AI' ? 'is-ai' : ''}">${engine.tag}</span>
         <span style="flex:1"></span>
-        <button type="button" class="ghost" data-use="${engine.id}">${settings.engine === engine.id ? '使用中' : '使用'}</button>
+        <button type="button" class="ghost${settings.engine === engine.id ? ' is-current' : ''}" data-use="${engine.id}">${settings.engine === engine.id ? '使用中' : '使用'}</button>
       </div>
       <p class="service-note">${engine.note}</p>
       <div class="service-body">${fields}</div>
       <div class="service-foot">
         <button type="button" class="ghost small" data-test="${engine.id}">测试连接</button>
+        ${canDetect ? `<button type="button" class="ghost small" data-detect="${engine.id}">检测模型</button>` : ''}
         <span class="service-status" data-status="${engine.id}"></span>
       </div>
+      ${canDetect ? `<div class="model-picker" data-models="${engine.id}" hidden></div>` : ''}
     </div>`;
   }).join('');
 }
@@ -339,7 +342,11 @@ function bindServices() {
       return;
     }
     const testButton = event.target.closest('[data-test]');
-    if (testButton) await testEngine(testButton.dataset.test, testButton);
+    if (testButton) { await testEngine(testButton.dataset.test, testButton); return; }
+    const detectButton = event.target.closest('[data-detect]');
+    if (detectButton) { await detectEngineModels(detectButton.dataset.detect, detectButton); return; }
+    const chip = event.target.closest('[data-model]');
+    if (chip) applyDetectedModel(chip.closest('[data-models]')?.dataset.models, chip.dataset.model);
   });
 
   container.addEventListener('change', event => {
@@ -389,8 +396,17 @@ function syncServiceDeps(card) {
   });
 }
 
+// Single source of truth for "which engine is in use": called both when the
+// service card's 「使用」 button is clicked and when the header dropdown changes.
+// The button text/class must be updated here — toggling only the card highlight
+// left every 「使用」 button stale after a card click.
 function syncServiceActive() {
   $$('[data-service]').forEach(card => card.classList.toggle('is-active', card.dataset.service === settings.engine));
+  $$('[data-use]').forEach(button => {
+    const current = button.dataset.use === settings.engine;
+    button.textContent = current ? '使用中' : '使用';
+    button.classList.toggle('is-current', current);
+  });
 }
 
 function showSelectedService() {
@@ -402,11 +418,84 @@ function showSelectedService() {
     card?.scrollIntoView({ behavior: 'smooth', block: 'center' });
     card?.querySelector('input')?.focus({ preventScroll: true });
   });
-  $$('[data-use]').forEach(button => {
-    const current = button.dataset.use === settings.engine;
-    button.textContent = current ? '使用中' : '使用';
-    button.classList.toggle('is-current', current);
+}
+
+// Read the *live* form values so a just-typed address/key is used even before
+// the debounced save lands. On Safari an empty password box must not shadow a
+// key stored in the system Keychain — the background fills it from secretCache.
+function draftEngineConfig(engine) {
+  const config = { ...(settings.engines[engine] || {}) };
+  $(`[data-service="${engine}"]`)?.querySelectorAll('[data-engine][data-key]').forEach(input => {
+    const { key, kind } = input.dataset;
+    const value = kind === 'switch' ? input.checked : input.value.trim();
+    if (input.type === 'password' && !value) return;
+    config[key] = value;
   });
+  return config;
+}
+
+function renderModelPicker(engine, models) {
+  const picker = $(`[data-models="${engine}"]`);
+  if (!picker) return;
+  const current = String(settings.engines[engine]?.model || '').trim();
+  const label = document.createElement('span');
+  label.className = 'model-picker-label';
+  label.textContent = `可用模型 · ${models.length} 个（点击填入「模型」）`;
+  // Model ids come from an external endpoint: build nodes, never innerHTML.
+  const chips = models.map(id => {
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = `model-chip${id === current ? ' is-current' : ''}`;
+    chip.dataset.model = id;
+    chip.textContent = id;
+    chip.title = `使用 ${id}`;
+    return chip;
+  });
+  picker.replaceChildren(label, ...chips);
+  picker.hidden = false;
+}
+
+function applyDetectedModel(engine, model) {
+  if (!engine || !model) return;
+  settings.engines[engine] ??= {};
+  settings.engines[engine].model = model;
+  const input = $(`[data-service="${engine}"] [data-engine][data-key="model"]`);
+  if (input) input.value = model;
+  const status = $(`[data-status="${engine}"]`);
+  if (status) {
+    status.className = 'service-status is-ok';
+    status.textContent = `已选用模型：${model}`;
+  }
+  $(`[data-models="${engine}"]`)?.querySelectorAll('.model-chip')
+    .forEach(chip => chip.classList.toggle('is-current', chip.dataset.model === model));
+  scheduleSave();
+}
+
+async function detectEngineModels(engine, button) {
+  const status = $(`[data-status="${engine}"]`);
+  status.className = 'service-status';
+  status.textContent = '正在检测可用模型…';
+  button.disabled = true;
+  try {
+    await flushSave();
+    const response = await sendMessage({
+      type: 'detect-models',
+      engine,
+      config: draftEngineConfig(engine)
+    });
+    if (response?.error) throw new Error(response.error);
+    const models = Array.isArray(response?.models) ? response.models : [];
+    status.className = 'service-status is-ok';
+    status.textContent = `检测到 ${models.length} 个模型，点击即可填入`;
+    renderModelPicker(engine, models);
+  } catch (error) {
+    status.className = 'service-status is-error is-long';
+    status.textContent = error?.message || '模型检测失败';
+    const picker = $(`[data-models="${engine}"]`);
+    if (picker) picker.hidden = true;
+  } finally {
+    button.disabled = false;
+  }
 }
 
 async function testEngine(engine, button) {
@@ -421,7 +510,7 @@ async function testEngine(engine, button) {
     status.className = 'service-status is-ok';
     status.textContent = `成功：${response.text}`;
   } catch (error) {
-    status.className = 'service-status is-error';
+    status.className = 'service-status is-error is-long';
     status.textContent = error?.message || '测试失败';
   } finally {
     button.disabled = false;

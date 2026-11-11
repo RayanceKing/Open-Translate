@@ -63,7 +63,7 @@ async function http(url, options = {}, timeout = TIMEOUT) {
     } catch {
       /* keep raw text */
     }
-    if (!response.ok) throw new Error(describeError(response.status, data, raw));
+    if (!response.ok) throw new Error(describeError(response.status, data, raw, url));
     return data;
   } catch (error) {
     if (error?.name === 'AbortError') throw new Error('翻译请求超时，请检查网络或接口地址');
@@ -74,17 +74,67 @@ async function http(url, options = {}, timeout = TIMEOUT) {
   }
 }
 
-function describeError(status, data, raw) {
+// Bilibili's WAF answers with an HTML risk-control page (HTTP 412) instead of
+// JSON whenever the request carries a browser-extension Origin
+// (chrome-extension://, safari-web-extension://, moz-extension://). The public
+// API is keyless and works from a normal origin; upstream recommends a local
+// bridge proxy for extensions. Give an actionable hint instead of dumping HTML.
+export const INDEX_TRANSLATE_412 = 'B 站安全风控拒绝了浏览器扩展发起的请求（HTTP 412）：公共接口不接受扩展来源的 Origin。请把「接口地址」改为官方本地桥接代理 http://127.0.0.1:8080/v1（运行 python inference/llm/call_api.py --serve），或改为自建 vLLM 地址；油猴脚本不受此限制。';
+
+function describeError(status, data, raw, url = '') {
+  const text = String(raw || '');
+  const isIndex = /index-translate\.bilibili\.com/i.test(String(url || ''));
+  if (isIndex && (status === 412 || /哔哩哔哩安全风控|错误号:\s*412/.test(text))) return INDEX_TRANSLATE_412;
   const detail =
     data?.error?.message ||
     data?.error?.type ||
     data?.message ||
     data?.error_description ||
     (typeof data === 'string' ? data.slice(0, 120) : '') ||
-    String(raw || '').slice(0, 120);
+    text.slice(0, 120);
   if (status === 401 || status === 403) return `密钥无效或权限不足（HTTP ${status}）${detail ? '：' + detail : ''}`;
   if (status === 429) return '请求过于频繁或额度用尽（HTTP 429），请稍后重试或更换引擎';
   return `服务返回错误（HTTP ${status}）${detail ? '：' + detail : ''}`;
+}
+
+// Chromium/Safari attach `Origin: chrome-extension://<id>` (or
+// safari-web-extension://) to requests started from the background page. B站's
+// WAF answers those with an HTML 412 risk-control page even though the public
+// API is free and keyless. A narrowly scoped dynamic DNR rule drops just that
+// header for this single host. Safari does not apply modifyHeaders to
+// extension-initiated requests, so the actionable 412 hint above remains the
+// fallback there (and on any browser where DNR is unavailable).
+const INDEX_DNR_RULE_ID = 1;
+export async function installIndexTranslateHeaderRule() {
+  const dnr = typeof chrome !== 'undefined' ? chrome.declarativeNetRequest : null;
+  if (typeof dnr?.updateDynamicRules !== 'function' || !chrome?.runtime?.id) return false;
+  const action = {
+    type: 'modifyHeaders',
+    requestHeaders: [{ header: 'Origin', operation: 'remove' }]
+  };
+  const condition = {
+    urlFilter: '||index-translate.bilibili.com/',
+    resourceTypes: ['xmlhttprequest']
+  };
+  const attempts = [
+    { ...condition, initiatorDomains: [chrome.runtime.id] },
+    condition
+  ];
+  for (let index = 0; index < attempts.length; index += 1) {
+    try {
+      await dnr.updateDynamicRules({
+        removeRuleIds: [INDEX_DNR_RULE_ID],
+        addRules: [{ id: INDEX_DNR_RULE_ID, priority: 1, action, condition: attempts[index] }]
+      });
+      return true;
+    } catch (error) {
+      // Older Chrome builds (pre-101) reject `initiatorDomains`; retry with the
+      // host-scoped fallback. Any other failure is non-fatal — translation and
+      // model detection still report the 412 hint so users can use the bridge.
+      if (index === attempts.length - 1) console.warn('Open Translate: 无法注册 Index 翻译请求头规则', error);
+    }
+  }
+  return false;
 }
 
 const trimSlash = value => String(value || '').replace(/\/+$/, '');
@@ -459,7 +509,7 @@ function isSafariExtension() {
 
 function autoEngineIds(settings = {}) {
   const configured = settings.engines || {};
-  const ids = ['google', 'mymemory'];
+  const ids = ['google', 'mymemory', 'indextranslate'];
   if (!configured.microsoft?.useKey || String(configured.microsoft.key || '').trim()) ids.push('microsoft');
   if (isSafariExtension()) ids.push('apple');
   if (String(configured.deepl?.key || '').trim()) ids.push('deepl');
@@ -566,6 +616,22 @@ const deepseek = { id: 'deepseek', translate: openAiChat };
 const custom = {
   id: 'custom',
   translate: options => openAiChat({ ...options, config: { ...options.config, allowAnonymous: true } })
+};
+
+// Index-Translate (Bilibili) is an OpenAI-compatible chat-completions endpoint
+// with a free, keyless public API. It is a translation-specialised model rather
+// than a general LLM, so it gets its own entry with sensible defaults instead of
+// forcing users through the generic "custom" form. The API key is optional
+// (any string or empty is accepted), and the online + self-hosted vLLM base
+// URLs and the flagship model are pre-filled when the user leaves them blank.
+const indextranslate = {
+  id: 'indextranslate',
+  translate({ texts, source, target, config }) {
+    const merged = { ...config, allowAnonymous: true };
+    if (!trimSlash(merged.baseUrl)) merged.baseUrl = 'https://index-translate.bilibili.com/v1';
+    if (!merged.model) merged.model = 'Index-Translate-35B-A3B';
+    return openAiChat({ texts, source, target, config: merged });
+  }
 };
 
 const gemini = {
@@ -736,14 +802,20 @@ async function visionClaude({ image, prompt, config }) {
   return content;
 }
 
-function parseVisionResult(raw) {
+function parseVisionResult(raw, { allowPlainText = false } = {}) {
   let text = String(raw || '').trim();
+  // Reasoning models occasionally prepend a <think> block to the answer.
+  text = text.replace(/^\s*<think\b[^>]*>[\s\S]*?<\/think>\s*/i, '');
   const fence = /^```(?:json)?\s*([\s\S]*?)\s*```$/i.exec(text);
   if (fence) text = fence[1].trim();
   let data;
   try {
     data = JSON.parse(text);
   } catch {
+    // Index-Translate is a translation-specialised model: on some images it
+    // returns a plain translated sentence instead of the requested box array.
+    // Show that over the whole image rather than failing the entire panel.
+    if (allowPlainText && text) return [{ box: [0, 0, 1, 1], text: '', translation: text }];
     throw new Error('视觉模型返回的不是有效 JSON');
   }
   if (!Array.isArray(data)) throw new Error('视觉模型返回的格式不正确');
@@ -761,19 +833,86 @@ function parseVisionResult(raw) {
   return boxes;
 }
 
+const VISION_LABEL = {
+  indextranslate: 'Index 翻译',
+  openai: 'OpenAI',
+  gemini: 'Gemini',
+  claude: 'Claude'
+};
+
 export async function visionOcrTranslate({ engine, image, source = 'auto', target, config = {} }) {
-  if (!VISION_ENGINES.includes(engine)) throw new Error('该引擎不支持视觉翻译，请选择 OpenAI / Gemini / Claude');
+  if (!VISION_ENGINES.includes(engine)) {
+    throw new Error(`该引擎不支持视觉翻译，请选择：${VISION_ENGINES.map(id => VISION_LABEL[id] || id).join(' / ')}`);
+  }
+  let merged = config;
+  if (engine === 'indextranslate') {
+    // Same keyless OpenAI-compatible endpoint as text translation, but the
+    // vision caller needs its own defaults (its fallback model is gpt-4o-mini).
+    merged = { ...config, allowAnonymous: true };
+    if (!trimSlash(merged.baseUrl)) merged.baseUrl = 'https://index-translate.bilibili.com/v1';
+    if (!merged.model) merged.model = 'Index-Translate-35B-A3B';
+  }
   const caller = engine === 'gemini' ? visionGemini : engine === 'claude' ? visionClaude : visionOpenAi;
-  const raw = await caller({ image, prompt: visionUserPrompt(target), config });
-  return parseVisionResult(raw);
+  const raw = await caller({ image, prompt: visionUserPrompt(target), config: merged });
+  return parseVisionResult(raw, { allowPlainText: engine === 'indextranslate' });
 }
 
 // ---------------------------------------------------------------- registry
 
-export const PROVIDERS = { google, mymemory, deepl, deeplx, microsoft, libre, apple, openai, deepseek, gemini, claude, custom };
+export const PROVIDERS = { google, mymemory, deepl, deeplx, microsoft, libre, apple, openai, deepseek, gemini, claude, custom, indextranslate };
 
 export function hasProvider(id) {
   return Boolean(PROVIDERS[id]);
+}
+
+// Default OpenAI-compatible base URLs when the user leaves the field blank.
+const MODEL_BASE = {
+  openai: 'https://api.openai.com/v1',
+  deepseek: 'https://api.deepseek.com/v1',
+  indextranslate: 'https://index-translate.bilibili.com/v1'
+};
+
+/**
+ * Discover the models a configured AI endpoint actually exposes. The settings
+ * page uses this to validate an address/key and to offer clickable model ids,
+ * which doubles as a connectivity check (and surfaces the B站 WAF 412 hint).
+ * Returns a de-duplicated list of ids in the server's own order.
+ */
+export async function detectModels({ engine, config = {} }) {
+  const apiKey = String(config.apiKey || '').trim();
+  let url;
+  let headers = {};
+  if (engine === 'gemini') {
+    if (!apiKey) throw new Error('请先填写 Gemini API Key');
+    url = `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(apiKey)}&pageSize=200`;
+  } else if (engine === 'claude') {
+    if (!apiKey) throw new Error('请先填写 Anthropic API Key');
+    url = 'https://api.anthropic.com/v1/models?limit=200';
+    headers = {
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true'
+    };
+  } else {
+    const base = trimSlash(config.baseUrl) || MODEL_BASE[engine];
+    if (!base) throw new Error('请先填写接口地址');
+    url = `${base}/models`;
+    // The free public Index-Translate API is keyless but still expects *some*
+    // Bearer value from OpenAI-compatible clients.
+    if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+    else if (engine === 'indextranslate') headers.Authorization = 'Bearer index';
+  }
+  const data = await http(url, { headers }, 15000);
+  const rows = Array.isArray(data?.data) ? data.data
+    : Array.isArray(data?.models) ? data.models
+      : Array.isArray(data) ? data : [];
+  const ids = rows
+    .map(row => (typeof row === 'string' ? row : row?.id || row?.name || ''))
+    .filter(Boolean)
+    .map(id => String(id).replace(/^models\//, ''));
+  const models = [...new Set(ids)];
+  if (!models.length) throw new Error('该接口未返回可用模型，请检查地址与密钥');
+  return models;
 }
 
 export async function translateTexts({ engine, texts, source = 'auto', target, config = {} }) {

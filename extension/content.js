@@ -32,7 +32,8 @@
     openai: 'OpenAI',
     deepseek: 'DeepSeek',
     gemini: 'Gemini',
-    claude: 'Claude'
+    claude: 'Claude',
+    indextranslate: 'Index'
   };
   const SITE_RULES = {
     'github.com': ['article.markdown-body', '.js-comment-body', '.markdown-body'],

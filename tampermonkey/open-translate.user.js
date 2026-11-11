@@ -21,6 +21,7 @@
 // @connect      api.deepseek.com
 // @connect      generativelanguage.googleapis.com
 // @connect      api.anthropic.com
+// @connect      index-translate.bilibili.com
 // @connect      www.bing.com
 // @connect      cn.bing.com
 // @connect      *
@@ -269,11 +270,14 @@ function protectGlossary(texts, entries) {
   ];
   const LANG_LABEL = Object.fromEntries(LANGUAGES);
 
+  // Index 翻译 leads the AI group, matching ENGINE_PRIORITY in the extensions.
   const ENGINE_NAMES = {
     auto: '自动',
     microsoft: 'Microsoft 翻译', google: 'Google 翻译',
     mymemory: 'MyMemory', deepl: 'DeepL', deeplx: 'DeepLX',
-    libre: 'LibreTranslate', openai: 'OpenAI', deepseek: 'DeepSeek', gemini: 'Google Gemini', claude: 'Claude',
+    libre: 'LibreTranslate',
+    indextranslate: 'Index 翻译',
+    openai: 'OpenAI', deepseek: 'DeepSeek', gemini: 'Google Gemini', claude: 'Claude',
     custom: '自定义接口'
   };
 
@@ -281,7 +285,8 @@ function protectGlossary(texts, entries) {
     auto: '自动',
     google: 'Google', mymemory: 'MyMemory', deepl: 'DeepL', deeplx: 'DeepLX', microsoft: '微软',
     libre: 'Libre', openai: 'OpenAI', deepseek: 'DeepSeek', gemini: 'Gemini', claude: 'Claude',
-    custom: '自定义'
+    custom: '自定义',
+    indextranslate: 'Index'
   };
 
   const ENGINE_FIELDS = {
@@ -303,6 +308,11 @@ function protectGlossary(texts, entries) {
     libre: [
       { key: 'url', label: '实例地址', type: 'text', placeholder: 'https://libretranslate.example.com' },
       { key: 'key', label: 'API Key', type: 'password', placeholder: '可留空' }
+    ],
+    indextranslate: [
+      { key: 'baseUrl', label: '接口地址', type: 'text', placeholder: 'https://index-translate.bilibili.com/v1' },
+      { key: 'apiKey', label: 'API Key（可选）', type: 'password', placeholder: '可留空' },
+      { key: 'model', label: '模型', type: 'text', placeholder: 'Index-Translate-35B-A3B' }
     ],
     openai: [
       { key: 'baseUrl', label: '接口地址', type: 'text', placeholder: 'https://api.openai.com/v1' },
@@ -330,7 +340,7 @@ function protectGlossary(texts, entries) {
     ]
   };
 
-  const AI_ENGINES = ['openai', 'deepseek', 'gemini', 'claude', 'custom'];
+  const AI_ENGINES = ['indextranslate', 'openai', 'deepseek', 'gemini', 'claude', 'custom'];
 
   const DEFAULT_PROMPT = [
     'You are a professional translator. Translate the text into {{target}}.',
@@ -387,7 +397,8 @@ function protectGlossary(texts, entries) {
       deepseek: { baseUrl: 'https://api.deepseek.com/v1', apiKey: '', model: 'deepseek-chat' },
       gemini: { apiKey: '', model: 'gemini-2.0-flash' },
       claude: { apiKey: '', model: 'claude-3-5-haiku-latest' },
-      custom: { name: '', baseUrl: '', apiKey: '', model: '' }
+      custom: { name: '', baseUrl: '', apiKey: '', model: '' },
+    indextranslate: { baseUrl: 'https://index-translate.bilibili.com/v1', apiKey: '', model: 'Index-Translate-35B-A3B' }
     },
     siteRules: { blacklist: [], alwaysTranslate: [] },
     subtitles: { enabled: true, mode: 'bilingual', fontSize: 100, position: 10, background: true, shortcut: 'Alt+S' },
@@ -588,6 +599,11 @@ function protectGlossary(texts, entries) {
 
   // ---------------------------------------------------------------- transport
 
+  // B站's WAF replies with an HTML risk-control page (HTTP 412) instead of JSON
+  // for origins it does not like. Surface an actionable hint instead of a wall
+  // of HTML. Userscripts normally pass, but rate limits / proxy setups can hit it.
+  const INDEX_TRANSLATE_412 = 'B 站安全风控拒绝了本次请求（HTTP 412）：公共接口不接受该请求来源。请把「接口地址」改为官方本地桥接代理 http://127.0.0.1:8080/v1（运行 python inference/llm/call_api.py --serve），或改为自建 vLLM 地址 http://127.0.0.1:8000/v1。';
+
   function http({ url, method = 'GET', headers = {}, data = null, timeout = 25000 }) {
     return new Promise((resolve, reject) => {
       GM_xmlhttpRequest({
@@ -604,7 +620,13 @@ function protectGlossary(texts, entries) {
             /* keep text */
           }
           if (response.status < 200 || response.status >= 300) {
-            const detail = parsed?.error?.message || parsed?.message || String(response.responseText || '').slice(0, 120);
+            const text = String(response.responseText || '');
+            const isIndex = /index-translate\.bilibili\.com/i.test(String(url || ''));
+            if (isIndex && (response.status === 412 || /哔哩哔哩安全风控|错误号:\s*412/.test(text))) {
+              reject(new Error(INDEX_TRANSLATE_412));
+              return;
+            }
+            const detail = parsed?.error?.message || parsed?.message || text.slice(0, 120);
             reject(new Error(`服务返回错误（HTTP ${response.status}）${detail ? '：' + detail : ''}`));
             return;
           }
@@ -619,6 +641,48 @@ function protectGlossary(texts, entries) {
   // ---------------------------------------------------------------- engines
 
   const trimSlash = value => String(value || '').replace(/\/+$/, '');
+
+  // ------------------------------------------------------------ model discovery
+  const MODEL_BASE = {
+    openai: 'https://api.openai.com/v1',
+    deepseek: 'https://api.deepseek.com/v1',
+    indextranslate: 'https://index-translate.bilibili.com/v1'
+  };
+
+  async function detectModels(engine, config = {}) {
+    const apiKey = String(config.apiKey || '').trim();
+    let url;
+    let headers = {};
+    if (engine === 'gemini') {
+      if (!apiKey) throw new Error('请先填写 Gemini API Key');
+      url = `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(apiKey)}&pageSize=200`;
+    } else if (engine === 'claude') {
+      if (!apiKey) throw new Error('请先填写 Anthropic API Key');
+      url = 'https://api.anthropic.com/v1/models?limit=200';
+      headers = {
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true'
+      };
+    } else {
+      const base = trimSlash(config.baseUrl) || MODEL_BASE[engine];
+      if (!base) throw new Error('请先填写接口地址');
+      url = `${base}/models`;
+      if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+      else if (engine === 'indextranslate') headers.Authorization = 'Bearer index';
+    }
+    const data = await http({ url, headers, timeout: 15000 });
+    const rows = Array.isArray(data?.data) ? data.data
+      : Array.isArray(data?.models) ? data.models
+        : Array.isArray(data) ? data : [];
+    const ids = rows
+      .map(row => (typeof row === 'string' ? row : row?.id || row?.name || ''))
+      .filter(Boolean)
+      .map(id => String(id).replace(/^models\//, ''));
+    const models = [...new Set(ids)];
+    if (!models.length) throw new Error('该接口未返回可用模型，请检查地址与密钥');
+    return models;
+  }
 
   // DeepLX / DLX: unofficial self-hosted DeepL bridge. POST /translate accepts
   // an array and answers with a position-aligned array in `data`, but the
@@ -901,7 +965,7 @@ function protectGlossary(texts, entries) {
     const engine = config.engine;
     if (engine === 'auto') {
       const configured = config.engines || {};
-      const ids = ['google', 'mymemory'];
+      const ids = ['google', 'mymemory', 'indextranslate'];
       if (!configured.microsoft?.useKey || configured.microsoft.key) ids.push('microsoft');
       if (configured.deepl?.key) ids.push('deepl');
       // Only join the race when an instance was actually configured.
@@ -993,6 +1057,31 @@ function protectGlossary(texts, entries) {
       });
       const result = data?.translatedText;
       return Array.isArray(result) ? result : [String(result || '')];
+    }
+
+    if (engine === 'indextranslate') {
+      // B 站开源的 Index-Translate，兼容 OpenAI 接口但允许匿名：无 Key 也可免费使用。
+      const base = trimSlash(cfg.baseUrl) || 'https://index-translate.bilibili.com/v1';
+      const model = cfg.model || 'Index-Translate-35B-A3B';
+      const token = cfg.apiKey || 'index';
+      return runAi(async prompt => {
+        const data = await http({
+          url: `${base}/chat/completions`,
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          data: JSON.stringify({
+            model,
+            temperature: 0,
+            messages: [
+              { role: 'system', content: 'You are a precise translator. You output only the translation.' },
+              { role: 'user', content: prompt }
+            ]
+          })
+        });
+        const content = data?.choices?.[0]?.message?.content;
+        if (!content) throw new Error('模型没有返回译文');
+        return content;
+      }, texts, target, config);
     }
 
     if (engine === 'openai' || engine === 'deepseek' || engine === 'custom') {
@@ -2662,7 +2751,7 @@ function protectGlossary(texts, entries) {
     .switch input:checked + i::after { transform: translateX(18px); }
     .switch input:focus-visible + i { box-shadow: 0 0 0 4px var(--dlg-accent-soft), inset 0 1px 3px rgba(0,0,0,.14); }
 
-    .row-actions { display: flex; align-items: center; gap: 10px; margin: 6px 0 12px; }
+    .row-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin: 6px 0 12px; }
     .btn { border: 1px solid var(--dlg-line-strong); background: var(--dlg-field); color: inherit;
       padding: 7px 15px; border-radius: 999px; font-size: 12.5px; font-weight: 550; cursor: pointer;
       box-shadow: var(--dlg-inner); transition: background .16s ease, border-color .16s ease, color .16s ease, transform .12s ease; }
@@ -2675,6 +2764,20 @@ function protectGlossary(texts, entries) {
     .status { font-size: 12px; color: var(--dlg-muted); }
     .status.ok { color: #1a7f37; }
     .status.bad { color: #d92d20; }
+    .status.long { flex: 1 1 100%; line-height: 1.6; overflow-wrap: anywhere; }
+
+    .model-picker { display: flex; flex-wrap: wrap; align-items: center; gap: 7px;
+      margin: 0 0 12px; padding: 10px 12px; border: 1px solid var(--dlg-line-strong);
+      border-radius: 12px; background: var(--dlg-field); }
+    .model-picker[hidden] { display: none; }
+    .model-picker-label { flex: 0 0 100%; font-size: 11.5px; color: var(--dlg-muted); }
+    .model-chip { border: 1px solid var(--dlg-line-strong); border-radius: 999px;
+      background: transparent; color: inherit; padding: 4px 10px; font-size: 11.5px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      cursor: pointer; max-width: 100%; overflow-wrap: anywhere; }
+    .model-chip:hover { border-color: rgba(0,122,255,.5); color: var(--dlg-accent-ink); background: var(--dlg-field-hover); }
+    .model-chip.is-current { border-color: var(--dlg-accent); color: var(--dlg-accent-ink);
+      background: var(--dlg-accent-soft); font-weight: 650; }
     .muted-inline { margin-left: auto; font-size: 12px; color: var(--dlg-muted); }
 
     .footer { display: flex; align-items: center; gap: 9px; padding: 14px 20px 18px;
@@ -2902,6 +3005,34 @@ function protectGlossary(texts, entries) {
     placeDock();
   }
 
+  // Last successful model discovery survives a settings re-render.
+  let detectedModelState = { engine: null, models: [] };
+
+  function paintModelPicker() {
+    const picker = ui.overlay.querySelector('[data-model-picker]');
+    if (!picker) return;
+    if (detectedModelState.engine !== settings.engine || !detectedModelState.models.length) {
+      picker.hidden = true;
+      return;
+    }
+    const current = String(settings.engines[settings.engine]?.model || '').trim();
+    const label = document.createElement('span');
+    label.className = 'model-picker-label';
+    label.textContent = `可用模型 · ${detectedModelState.models.length} 个（点击填入「模型」）`;
+    // Model ids come from an external endpoint: build nodes, never innerHTML.
+    const chips = detectedModelState.models.map(id => {
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = `model-chip${id === current ? ' is-current' : ''}`;
+      chip.dataset.model = id;
+      chip.textContent = id;
+      chip.title = `使用 ${id}`;
+      return chip;
+    });
+    picker.replaceChildren(label, ...chips);
+    picker.hidden = false;
+  }
+
   function renderSettings() {
     const engine = settings.engine;
     const fields = ENGINE_FIELDS[engine] || [];
@@ -2984,8 +3115,11 @@ function protectGlossary(texts, entries) {
             ${fieldHtml || '<p class="hint">这个引擎不需要密钥，开箱即用。</p>'}
             <div class="row-actions">
               <button class="btn" type="button" data-test>测试连接</button>
+              ${AI_ENGINES.includes(engine) ? '<button class="btn" type="button" data-detect-models>检测模型</button>' : ''}
               <span class="status" data-status></span>
             </div>
+            ${AI_ENGINES.includes(engine) ? '<div class="model-picker" data-model-picker hidden></div>' : ''}
+            ${engine === 'indextranslate' ? '<p class="hint">公共接口免费、无需密钥。若出现 HTTP 412（B 站风控拦截扩展来源请求），把接口地址改为官方本地桥接 http://127.0.0.1:8080/v1（运行 python inference/llm/call_api.py --serve），或自建 vLLM http://127.0.0.1:8000/v1。</p>' : ''}
             <p class="hint">密钥只保存在本机（GM 存储），不会上传到任何第三方服务器；请求直接从浏览器发往对应的翻译服务。</p>
           </div>
 
@@ -3036,6 +3170,7 @@ function protectGlossary(texts, entries) {
       </div>
     `);
 
+    paintModelPicker();
     bindSettingsUi();
     positionTabGlider(false);
   }
@@ -3292,13 +3427,57 @@ function protectGlossary(texts, entries) {
           status.className = 'status ok';
           status.textContent = `成功：${sample}`;
         } catch (error) {
-          status.className = 'status bad';
+          status.className = 'status bad long';
           status.textContent = error?.message || '测试失败';
         } finally {
           testButton.disabled = false;
         }
       });
     }
+
+    const detectButton = root.querySelector('[data-detect-models]');
+    if (detectButton) {
+      detectButton.addEventListener('click', async () => {
+        const status = root.querySelector('[data-status]');
+        const engine = settings.engine;
+        status.className = 'status';
+        status.textContent = '正在检测可用模型…';
+        detectButton.disabled = true;
+        try {
+          const models = await detectModels(engine, settings.engines[engine] || {});
+          detectedModelState = { engine, models };
+          paintModelPicker();
+          status.className = 'status ok';
+          status.textContent = `检测到 ${models.length} 个模型，点击即可填入`;
+        } catch (error) {
+          detectedModelState = { engine: null, models: [] };
+          const picker = root.querySelector('[data-model-picker]');
+          if (picker) picker.hidden = true;
+          status.className = 'status bad long';
+          status.textContent = error?.message || '模型检测失败';
+        } finally {
+          detectButton.disabled = false;
+        }
+      });
+    }
+
+    root.querySelector('[data-model-picker]')?.addEventListener('click', event => {
+      const chip = event.target.closest('[data-model]');
+      if (!chip) return;
+      const engine = settings.engine;
+      const model = chip.dataset.model;
+      setPath(settings, `engines.${engine}.model`, model);
+      invalidateGlossaryTranslations();
+      persist();
+      const input = root.querySelector(`[data-k="engines.${engine}.model"]`);
+      if (input) input.value = model;
+      root.querySelectorAll('[data-model]').forEach(node => node.classList.toggle('is-current', node.dataset.model === model));
+      const status = root.querySelector('[data-status]');
+      if (status) {
+        status.className = 'status ok';
+        status.textContent = `已选用模型：${model}`;
+      }
+    });
   }
 
   function openSettings() {

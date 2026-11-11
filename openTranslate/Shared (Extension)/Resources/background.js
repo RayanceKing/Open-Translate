@@ -1,5 +1,11 @@
 import { loadSettings, syncFromCloud } from './lib/store.js';
-import { translateTexts, visionOcrTranslate, VISION_ENGINES } from './lib/engines.js';
+import {
+  translateTexts,
+  visionOcrTranslate,
+  VISION_ENGINES,
+  detectModels,
+  installIndexTranslateHeaderRule
+} from './lib/engines.js';
 import { maskAll } from './lib/privacy.js';
 import { AI_ENGINES, SECRET_FIELDS } from './lib/defaults.js';
 import { nativeSend } from './lib/native.js';
@@ -145,6 +151,22 @@ async function handleTest({ engine }) {
   return sample;
 }
 
+// Model discovery for AI services. Safari stores API keys in the system
+// Keychain rather than in settings, so merge: stored settings → live form
+// draft → Keychain secret (only when the draft left the key blank).
+async function handleDetectModels({ engine, config: draft = {} }) {
+  if (!AI_ENGINES.includes(engine)) throw new Error('该翻译服务不支持模型检测');
+  const settings = await loadSettings();
+  await ensureSecrets();
+  const config = { ...(settings.engines[engine] || {}), ...(draft || {}) };
+  const secretField = SECRET_FIELDS[engine];
+  if (secretField && !String(config[secretField] || '').trim() && secretCache[engine]) {
+    config[secretField] = secretCache[engine];
+  }
+  const models = await detectModels({ engine, config });
+  return { models };
+}
+
 // Image OCR + translation for manga mode. The content script sends the image as
 // a data URL; we hand it to a multimodal engine and return detected boxes.
 async function handleTranslateImage({ image, engine, source, target }, snapshot) {
@@ -179,6 +201,10 @@ chrome.runtime.onMessage.addListener((message, _sender, respond) => {
   }
   if (message?.type === 'test-engine') {
     handleTest(message).then(text => respond({ text })).catch(fail);
+    return true;
+  }
+  if (message?.type === 'detect-models') {
+    handleDetectModels(message).then(result => respond(result)).catch(fail);
     return true;
   }
   if (message?.type === 'cache-stats') {
@@ -217,6 +243,10 @@ chrome.commands?.onCommand.addListener(async command => {
 });
 
 chrome.runtime.onInstalled.addListener(() => {
+  // Best-effort fix for the B站 WAF's HTTP 412 on extension-origin requests.
+  // Safari may ignore modifyHeaders on extension-initiated fetches; the 412
+  // hint in lib/engines.js then guides users to the local bridge proxy.
+  installIndexTranslateHeaderRule().catch(() => {});
   try {
     chrome.contextMenus.create({ id: 'ot-translate-selection', title: '翻译选中文本', contexts: ['selection'] });
   } catch {

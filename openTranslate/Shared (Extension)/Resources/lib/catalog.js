@@ -1,7 +1,10 @@
 // UI metadata for every translation engine. Kept free of network code so the
 // options page can import it without pulling in the provider implementations.
 
-const ENGINE_PRIORITY = ['auto', 'apple', 'microsoft', 'google'];
+// Pinned order for the engine dropdown / service list. `indextranslate` sits
+// right after the core free engines so it leads the AI group in every UI
+// (options page, popup and the userscript's engine list).
+const ENGINE_PRIORITY = ['auto', 'apple', 'microsoft', 'google', 'indextranslate'];
 
 const ENGINE_CATALOG_DATA = [
   {
@@ -125,6 +128,17 @@ const ENGINE_CATALOG_DATA = [
       { key: 'baseUrl', label: '接口地址', type: 'text', placeholder: 'https://example.com/v1' },
       { key: 'apiKey', label: 'API Key', type: 'password', placeholder: '可留空' },
       { key: 'model', label: '模型', type: 'text', placeholder: 'gpt-4o-mini' }
+    ]
+  },
+  {
+    id: 'indextranslate',
+    name: 'Index 翻译',
+    tag: 'AI',
+    note: 'B 站开源的 Index-Translate 翻译模型，兼容 OpenAI 接口，无需密钥即可免费使用，支持 150 种语言，对中文与网络用语友好；原生视觉编码器同时支持图片翻译，可在「漫画模式」里选作视觉引擎。浏览器扩展直连公共接口可能被 B 站风控拦截（HTTP 412）；此时请点「检测模型」查看提示，或把接口地址改为官方本地桥接 http://127.0.0.1:8080/v1（运行 python inference/llm/call_api.py --serve）、或自建 vLLM http://127.0.0.1:8000/v1。',
+    fields: [
+      { key: 'baseUrl', label: '接口地址', type: 'text', placeholder: 'https://index-translate.bilibili.com/v1' },
+      { key: 'apiKey', label: 'API Key（可选）', type: 'password', placeholder: '可留空' },
+      { key: 'model', label: '模型', type: 'text', placeholder: 'Index-Translate-35B-A3B' }
     ]
   }
 ];
