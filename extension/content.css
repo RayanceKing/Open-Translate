@@ -233,63 +233,22 @@ html.ot-loading-apple .ot-loading-skeleton::after {
    reads first and the translation follows immediately underneath. It stays in
    normal document flow and is removed with Escape / the close button. */
 
-.ot-selection-pair {
-  position: relative;
-  display: block;
-  box-sizing: border-box;
-  width: 100%;
-  flex: 0 0 100%;
-  grid-column: 1 / -1;
-  margin: 6px 0 18px;
-  padding: 0;
-  font-family: inherit;
-  text-align: inherit;
-  line-height: var(--ot-lh, 1.7);
-  direction: inherit;
-}
-
-.ot-selection-source,
+/* Selection translation reuses the full-page `.ot-translation` styling and
+   mirrors the source block's typography, so the original keeps its format — the
+   original element stays in place on the page and only this node is added. The
+   cloned selection (links/bold included) is filled directly into this node, so
+   the right gutter lives here to keep text clear of the × button. */
 .ot-selection-translation {
-  display: block;
-  max-width: 100%;
-  box-sizing: border-box;
+  position: relative;
+  padding-right: 24px;
   white-space: pre-wrap;
   overflow-wrap: break-word;
   word-break: break-word;
-  -webkit-box-decoration-break: clone;
-  box-decoration-break: clone;
-}
-
-.ot-selection-source {
-  margin: 0 0 3px;
-  padding: 0 calc(var(--ot-px, 8px) + 24px) 0 var(--ot-px, 8px);
-  font-size: calc(1em * var(--ot-fs, 1) * 0.92);
-  line-height: var(--ot-lh, 1.7);
-  color: var(--ot-color, inherit);
-  opacity: calc(var(--ot-op, 1) * 0.58);
-}
-
-.ot-selection-translation {
-  margin: 0;
-  padding: var(--ot-py, 2px) calc(var(--ot-px, 8px) + 24px) var(--ot-py, 2px) var(--ot-px, 8px);
-  border-radius: var(--ot-radius, 6px);
-  font-size: calc(1em * var(--ot-fs, 1));
-  line-height: var(--ot-lh, 1.7);
-  color: var(--ot-color, inherit);
-  opacity: var(--ot-op, 1);
-  background: transparent;
 }
 
 .ot-selection-translation.ot-pending {
   opacity: calc(var(--ot-op, 1) * 0.55);
   font-style: italic;
-}
-
-/* The generic pending rule is inline-block for full-page translations; a
-   selection pair must still own a full line. */
-html.ot-loading-apple .ot-selection-translation.ot-pending {
-  position: relative;
-  display: block;
 }
 
 .ot-selection-close {
@@ -313,7 +272,7 @@ html.ot-loading-apple .ot-selection-translation.ot-pending {
   cursor: pointer;
 }
 
-.ot-selection-pair:hover .ot-selection-close { opacity: 0.75; }
+.ot-selection-translation:hover .ot-selection-close { opacity: 0.75; }
 .ot-selection-close:hover { opacity: 1; }
 
 /* ---------- video subtitles ---------- */

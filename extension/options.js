@@ -506,24 +506,43 @@ function bindShortcutInputs() {
       if (event.shiftKey) modifiers.push('Shift');
       if (event.metaKey) modifiers.push('Meta');
 
-      // Single keys are allowed (e.g. "T" for selection translation). Reject
-      // only keys that cannot act as a shortcut on their own; the content
-      // script guards editable/interactive elements so typing never triggers it.
+      // Single keys are allowed, including a bare modifier (Alt / Shift /
+      // Ctrl / Command). Reject only keys that cannot act as a shortcut on
+      // their own; the content script guards editable/interactive targets.
       const ignoredKeys = [
-        'Alt', 'Control', 'Shift', 'Meta', 'AltGraph', 'CapsLock', 'Tab',
-        'Escape', 'Enter', 'Backspace', 'Delete', 'ContextMenu',
-        'Unidentified', 'Dead', 'Process', ' ', 'Spacebar', 'Compose'
+        'CapsLock', 'Tab', 'Escape', 'Enter', 'Backspace', 'Delete',
+        'ContextMenu', 'Unidentified', 'Dead', 'Process', ' ', 'Spacebar', 'Compose'
       ];
       if (event.isComposing || ignoredKeys.includes(event.key)
           || /^F\d{1,2}$/.test(event.key)
           || /^(Arrow|Page|Home|End|Insert|PrintScreen|ScrollLock|Pause|NumLock)/.test(event.key)) return;
 
       const code = event.code || '';
-      const rawKey = code.startsWith('Key') ? code.slice(3)
-        : code.startsWith('Digit') ? code.slice(5)
-          : event.key;
-      const key = String(rawKey).length === 1 ? rawKey.toUpperCase() : rawKey;
-      const combo = [...modifiers, key].join('+');
+      const BARE_MODIFIER = {
+        AltLeft: 'Alt', AltRight: 'Alt', AltGraph: 'Alt',
+        ControlLeft: 'Ctrl', ControlRight: 'Ctrl',
+        ShiftLeft: 'Shift', ShiftRight: 'Shift',
+        MetaLeft: 'Meta', MetaRight: 'Meta'
+      };
+      const bare = BARE_MODIFIER[code] || ({
+        Alt: 'Alt', AltGraph: 'Alt', Control: 'Ctrl', Shift: 'Shift', Meta: 'Meta'
+      })[event.key];
+      const held = [event.ctrlKey, event.altKey, event.shiftKey, event.metaKey].filter(Boolean).length;
+      let combo;
+      if (bare && held <= 1) {
+        // Pressing a modifier on its own is a valid single-key shortcut. The
+        // content script fires these on keyup so Alt+T does not misfire.
+        combo = bare;
+      } else {
+        const rawKey = code.startsWith('Key') ? code.slice(3)
+          : code.startsWith('Digit') ? code.slice(5)
+            : event.key;
+        const key = bare || (String(rawKey).length === 1 ? rawKey.toUpperCase() : rawKey);
+        // The pressed modifier is already in `modifiers`; counting it twice
+        // would produce "Alt+Shift+Alt" for a Shift+Alt combo.
+        const others = bare ? modifiers.filter(item => item !== bare) : modifiers;
+        combo = [...others, key].join('+');
+      }
       input.value = combo;
       if (input.id === 'shortcut-toggle' && toggleChoice) toggleChoice.value = '';
       setPath(settings, input.dataset.path, combo);

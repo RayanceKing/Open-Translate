@@ -304,18 +304,23 @@
     return display.includes('flex') || display.includes('grid');
   };
 
+  // Shared list of typography properties mirrored from the source block onto a
+  // translation node, so the translation reads in the exact same format as the
+  // original. Used by both full-page and selection translation.
+  const TRANSLATION_STYLE_PROPS = [
+    'display', 'font-family', 'font-size', 'font-weight', 'font-style', 'font-variant',
+    'line-height', 'letter-spacing', 'word-spacing', 'text-align', 'text-indent',
+    'text-transform', 'white-space', 'word-break', 'overflow-wrap', 'direction',
+    'writing-mode', 'vertical-align'
+  ];
+
   function mountTranslation(el) {
     const node = document.createElement('div');
     node.className = 'ot-translation ot-pending';
     node.setAttribute(MARK, 'translation');
     translationSources.set(node, el.cloneNode(true));
     const sourceStyle = getComputedStyle(el);
-    for (const property of [
-      'display', 'font-family', 'font-size', 'font-weight', 'font-style', 'font-variant',
-      'line-height', 'letter-spacing', 'word-spacing', 'text-align', 'text-indent',
-      'text-transform', 'white-space', 'word-break', 'overflow-wrap', 'direction',
-      'writing-mode', 'vertical-align'
-    ]) {
+    for (const property of TRANSLATION_STYLE_PROPS) {
       node.style.setProperty(property, sourceStyle.getPropertyValue(property));
     }
     if (sourceStyle.display !== 'inline') {
@@ -692,6 +697,14 @@
     return null;
   }
 
+  // Selection translation reuses the SAME mechanism as full-page translation.
+  // The original selection is left exactly where it is on the page (its format
+  // is therefore untouched), and a translation node is inserted right after the
+  // block holding the selection. Instead of flattening the selection to plain
+  // text, we snapshot the selected DOM via `range.cloneContents()` and refill
+  // only its text nodes (see fillFormattedTranslation) — so links, bold and
+  // other inline markup survive in the translation, exactly like full-page
+  // translation does for whole blocks.
   function mountSelectionPair(range, text) {
     const startBlock = selectionBlock(range.startContainer);
     const endBlock = selectionBlock(range.endContainer) || startBlock;
@@ -706,43 +719,52 @@
       stale.remove();
     }
 
-    const pair = document.createElement('div');
-    pair.className = 'ot-selection-pair';
-    pair.setAttribute(MARK, SELECTION_MARK);
+    const node = document.createElement('div');
+    node.className = 'ot-translation ot-selection-translation ot-pending';
+    node.setAttribute(MARK, SELECTION_MARK);
+    // Reuse the SAME format-preserving pipeline as full-page translation:
+    // snapshot the selected DOM (links, bold, inline markup included) and only
+    // swap each text node for its translation. So the selection translation
+    // keeps every link/format instead of being flattened to plain text.
+    translationSources.set(node, range.cloneContents());
+    // Mirror the source block's typography — identical to mountTranslation, so
+    // the selection translation and full-page translation share one format.
+    if (anchor) {
+      const sourceStyle = getComputedStyle(anchor);
+      for (const property of TRANSLATION_STYLE_PROPS) {
+        node.style.setProperty(property, sourceStyle.getPropertyValue(property));
+      }
+      if (sourceStyle.display !== 'inline') {
+        node.style.display = sourceStyle.display === 'inline-block' ? 'inline-block' : 'block';
+      }
+      node.style.margin = sourceStyle.margin;
+      node.style.padding = sourceStyle.padding;
+    }
 
     const close = document.createElement('button');
     close.type = 'button';
     close.className = 'ot-selection-close';
     close.setAttribute('aria-label', '关闭划词译文');
     close.textContent = '×';
-    close.addEventListener('click', () => pair.remove());
-    pair.append(close);
+    close.addEventListener('click', () => node.remove());
+    // fillFormattedTranslation replaces node's children once the result lands,
+    // so keep a handle to re-append the close button afterwards.
+    node._close = close;
 
-    // If the selection already covers a whole block, that block on the page IS
-    // the "original above" — echoing it again would read as duplicated text.
-    // Only partial or cross-block selections get their own quoted source line.
-    const coversWholeBlock = startBlock && startBlock === endBlock
-      && clean(startBlock.textContent) === clean(text);
-    if (!coversWholeBlock) {
-      const source = document.createElement('div');
-      source.className = 'ot-selection-source';
-      source.textContent = text;
-      pair.append(source);
-    }
-
-    const translation = document.createElement('div');
-    translation.className = 'ot-selection-translation ot-pending';
     if (settings.style.loadingStyle === 'apple') {
-      translation.classList.add('ot-loading-skeleton');
-      translation.style.setProperty('--ot-skeleton-width', `${Math.min(100, Math.max(24, text.length * 0.58))}%`);
+      node.classList.add('ot-loading-skeleton');
+      node.style.setProperty('--ot-skeleton-width', `${Math.min(100, Math.max(24, text.length * 0.58))}%`);
+      node.append(close);
     } else {
-      translation.textContent = '翻译中…';
+      const pending = document.createElement('span');
+      pending.className = 'ot-selection-pending';
+      pending.textContent = '翻译中…';
+      node.append(close, pending);
     }
-    pair.append(translation);
 
-    if (anchor) anchor.insertAdjacentElement('afterend', pair);
-    else document.body.append(pair);
-    return translation;
+    if (anchor) anchor.insertAdjacentElement('afterend', node);
+    else document.body.append(node);
+    return node;
   }
 
   async function translateSelection() {
@@ -756,18 +778,24 @@
     // Clone the range up front: the user may change the selection while the
     // request is in flight, and the insertion point must not move with it.
     const range = selection.getRangeAt(0).cloneRange();
-    const translation = mountSelectionPair(range, text);
+    const node = mountSelectionPair(range, text);
     try {
-      const [result] = await requestTranslation([text.slice(0, 4000)]);
-      if (!translation.isConnected) return;
-      translation.classList.remove('ot-pending', 'ot-loading-skeleton', 'ot-error');
-      translation.textContent = result || '没有可显示的译文';
-      if (settings.style.loadingStyle === 'apple') translation.classList.add('ot-result-reveal');
+      // Translate each text node of the cloned selection independently, then
+      // refill them in place — links and inline formatting survive because the
+      // surrounding elements are never re-created as plain text.
+      const segments = formattedSegments(node);
+      const results = await requestTranslation(segments);
+      if (!node.isConnected) return;
+      node.classList.remove('ot-pending', 'ot-loading-skeleton', 'ot-error');
+      fillFormattedTranslation(node, results);
+      if (node._close) node.append(node._close);
+      if (settings.style.loadingStyle === 'apple') node.classList.add('ot-result-reveal');
     } catch (error) {
-      if (!translation.isConnected) return;
-      translation.classList.remove('ot-pending', 'ot-loading-skeleton');
-      translation.textContent = `翻译失败：${error.message}`;
-      translation.classList.add('ot-error');
+      if (!node.isConnected) return;
+      node.classList.remove('ot-pending', 'ot-loading-skeleton');
+      node.textContent = `翻译失败：${error.message}`;
+      if (node._close) node.append(node._close);
+      node.classList.add('ot-error');
     }
   }
 
@@ -1953,8 +1981,33 @@
 
   // ---------------------------------------------------------------- shortcuts
 
+  const MODIFIER_ALIAS = {
+    alt: 'alt', altgraph: 'alt',
+    control: 'ctrl', ctrl: 'ctrl', ctl: 'ctrl',
+    shift: 'shift',
+    meta: 'meta', cmd: 'meta', command: 'meta', super: 'meta', win: 'meta', os: 'meta'
+  };
+  const MODIFIER_TAP_MS = 1500;
+
   function isSingleKey(combo) {
     return String(combo || '').split('+').filter(Boolean).length === 1;
+  }
+
+  // A single key can itself be a modifier ("Alt", "Shift", "Ctrl", "Meta").
+  // Those must fire on keyup: firing on keydown would also trigger for the
+  // first half of every Alt+T style combo.
+  function modifierCombo(combo) {
+    const parts = String(combo || '').toLowerCase().split('+').map(part => part.trim()).filter(Boolean);
+    return parts.length === 1 ? MODIFIER_ALIAS[parts[0]] || null : null;
+  }
+
+  function modifierFromEvent(event) {
+    const code = String(event.code || '');
+    if (/^Alt(Left|Right)$/.test(code) || code === 'AltGraph') return 'alt';
+    if (/^Control(Left|Right)$/.test(code)) return 'ctrl';
+    if (/^Shift(Left|Right)$/.test(code)) return 'shift';
+    if (/^Meta(Left|Right)$/.test(code)) return 'meta';
+    return MODIFIER_ALIAS[String(event.key || '').toLowerCase()] || null;
   }
 
   // A bare key (e.g. "T") is convenient but would otherwise fire on every
@@ -1987,20 +2040,65 @@
     return event.code?.toLowerCase() === `key${key}` || event.key?.toLowerCase() === key;
   }
 
-  document.addEventListener('keydown', event => {
-    const bindings = [
+  function shortcutBindings() {
+    return [
       [settings.shortcuts.toggle, toggle],
       [settings.shortcuts.selection, translateSelection],
       [settings.subtitles.shortcut, toggleSubtitles]
     ];
-    for (const [combo, action] of bindings) {
-      if (!combo || shortcutBlocked(event, combo) || !matchShortcut(event, combo)) continue;
+  }
+
+  // Tell a "bare tap" (Alt down, Alt up) from a combo (Alt down, T down, T up,
+  // Alt up) or a long hold. A pending tap is consumed by any other keydown.
+  let modifierTap = null;
+
+  function noteModifierDown(event) {
+    const id = modifierFromEvent(event);
+    if (id) {
+      const othersHeld =
+        (id !== 'alt' && event.altKey) ||
+        (id !== 'ctrl' && event.ctrlKey) ||
+        (id !== 'shift' && event.shiftKey) ||
+        (id !== 'meta' && event.metaKey);
+      if (!modifierTap) {
+        modifierTap = {
+          id, at: Date.now(),
+          consumed: othersHeld || Boolean(event.repeat) || Boolean(event.isComposing) || event.keyCode === 229
+        };
+      } else modifierTap.consumed = true;
+    } else if (modifierTap) {
+      modifierTap.consumed = true;
+    }
+  }
+
+  function runModifierTap(event) {
+    const id = modifierFromEvent(event);
+    const pending = modifierTap;
+    modifierTap = null;
+    if (!id || !pending || pending.consumed || pending.id !== id) return;
+    if (Date.now() - pending.at > MODIFIER_TAP_MS) return;
+    for (const [combo, action] of shortcutBindings()) {
+      if (modifierCombo(combo) !== id || shortcutBlocked(event, combo)) continue;
+      event.preventDefault();
+      action();
+      return;
+    }
+  }
+
+  document.addEventListener('keydown', event => {
+    noteModifierDown(event);
+    for (const [combo, action] of shortcutBindings()) {
+      if (!combo || modifierCombo(combo)) continue;
+      if (shortcutBlocked(event, combo) || !matchShortcut(event, combo)) continue;
       event.preventDefault();
       action();
       return;
     }
     if (event.key === 'Escape') closeSelectionTranslations();
   });
+
+  document.addEventListener('keyup', event => { runModifierTap(event); });
+  window.addEventListener('blur', () => { modifierTap = null; });
 
   let touchGesture = null;
   document.addEventListener('touchstart', event => {

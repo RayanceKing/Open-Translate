@@ -172,7 +172,7 @@
         <div class="row shortcut-row">
           <div class="row-label">
             <label for="shortcut-toggle">翻译 / 还原快捷键</label>
-            <p>点击输入框后直接按键，支持组合键或单个按键，也可选择移动端三指或四指轻触。</p>
+            <p>点击输入框后直接按键，支持组合键、单个按键，或单独轻按 Alt / Shift / Ctrl / Command，也可选择移动端三指或四指轻触。</p>
           </div>
           <div class="row-control shortcut-controls">
             <input class="shortcut" id="shortcut-toggle" data-path="shortcuts.toggle" readonly placeholder="Alt+T">
@@ -186,10 +186,10 @@
         <div class="row">
           <div class="row-label">
             <label for="shortcut-selection">翻译选中文本</label>
-            <p>选中网页文字后按键，译文按双语对照紧贴原文下方显示。可设为单个按键（如 T），在输入框内打字不会触发。</p>
+            <p>选中网页文字后按键，译文按双语对照紧贴原文下方显示。可设为单个按键（如 T）或单独轻按修饰键（如 Shift）；在输入框内打字不会触发。</p>
           </div>
           <div class="row-control">
-            <input class="shortcut" id="shortcut-selection" data-path="shortcuts.selection" readonly placeholder="Alt+Shift+T 或单键 T">
+            <input class="shortcut" id="shortcut-selection" data-path="shortcuts.selection" readonly placeholder="Alt+Shift+T / T / Shift">
           </div>
         </div>
       </div>
@@ -657,7 +657,7 @@
         <div class="card-title">快捷键</div>
         <ul class="bullets">
           <li><kbd id="kbd-toggle">Alt+T</kbd> 翻译 / 还原当前页面</li>
-          <li><kbd id="kbd-selection">Alt+Shift+T</kbd> 翻译当前选中的文本（可设为单键，译文内联显示在原文下方）</li>
+          <li><kbd id="kbd-selection">Alt+Shift+T</kbd> 翻译当前选中的文本（可设为单键或单独按 Alt / Shift，译文内联显示在原文下方）</li>
           <li><kbd id="kbd-subtitles">Alt+S</kbd> 开关视频双语字幕</li>
           <li><kbd>Esc</kbd> 清除所有划词译文</li>
         </ul>
