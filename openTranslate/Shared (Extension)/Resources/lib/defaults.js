@@ -111,6 +111,7 @@ export const DEFAULT_SETTINGS = {
     google: {},
     mymemory: {},
     deepl: { key: '', pro: false },
+    deeplx: { url: '', token: '' },
     microsoft: { useKey: false, key: '', region: 'global' },
     libre: { url: '', key: '' },
     apple: {},
@@ -176,6 +177,7 @@ export const SECRET_FIELDS = {
   custom: 'apiKey',
   libre: 'apiKey',
   deepl: 'key',
+  deeplx: 'token',
   microsoft: 'key'
 };
 

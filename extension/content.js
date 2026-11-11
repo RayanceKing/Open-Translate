@@ -26,6 +26,7 @@
     google: 'Google',
     mymemory: 'MyMemory',
     deepl: 'DeepL',
+    deeplx: 'DeepLX',
     microsoft: '微软',
     libre: 'Libre',
     openai: 'OpenAI',
@@ -662,12 +663,86 @@
   }
 
   // ---------------------------------------------------------------- selection
+  //
+  // Selection translation is rendered as an inline bilingual pair: the original
+  // stays where it is on the page and the translation is inserted immediately
+  // after the block holding the selection. That is the familiar reading order
+  // used by immersive/bilingual translation — no floating bubble covering the
+  // text that is being read.
 
-  let bubble = null;
+  const SELECTION_MARK = 'selection';
 
-  function closeBubble() {
-    bubble?.remove();
-    bubble = null;
+  function closeSelectionTranslations() {
+    document.querySelectorAll(`[${MARK}="${SELECTION_MARK}"]`).forEach(node => node.remove());
+  }
+
+  // Walk up from a Range endpoint to the nearest block-level ancestor. Always
+  // inserting *after* a block (never inside it) keeps the injected pair out of
+  // the DOM scanner's candidate list: SKIP already contains [data-open-translate].
+  function selectionBlock(node) {
+    let el = node?.nodeType === 1 ? node : node?.parentElement;
+    while (el && el !== document.body && el !== document.documentElement) {
+      if (el.nodeType === 1) {
+        const display = getComputedStyle(el).display;
+        if (display && display !== 'inline' && !display.startsWith('inline')
+            && display !== 'contents' && display !== 'none') return el;
+      }
+      el = el.parentElement;
+    }
+    return null;
+  }
+
+  function mountSelectionPair(range, text) {
+    const startBlock = selectionBlock(range.startContainer);
+    const endBlock = selectionBlock(range.endContainer) || startBlock;
+    const anchor = endBlock || startBlock;
+
+    // Retranslating the same block replaces its previous pair, so repeated
+    // lookups never stack up. Pairs on other blocks stay visible.
+    let next = anchor?.nextElementSibling;
+    while (next?.getAttribute?.(MARK) === SELECTION_MARK) {
+      const stale = next;
+      next = next.nextElementSibling;
+      stale.remove();
+    }
+
+    const pair = document.createElement('div');
+    pair.className = 'ot-selection-pair';
+    pair.setAttribute(MARK, SELECTION_MARK);
+
+    const close = document.createElement('button');
+    close.type = 'button';
+    close.className = 'ot-selection-close';
+    close.setAttribute('aria-label', '关闭划词译文');
+    close.textContent = '×';
+    close.addEventListener('click', () => pair.remove());
+    pair.append(close);
+
+    // If the selection already covers a whole block, that block on the page IS
+    // the "original above" — echoing it again would read as duplicated text.
+    // Only partial or cross-block selections get their own quoted source line.
+    const coversWholeBlock = startBlock && startBlock === endBlock
+      && clean(startBlock.textContent) === clean(text);
+    if (!coversWholeBlock) {
+      const source = document.createElement('div');
+      source.className = 'ot-selection-source';
+      source.textContent = text;
+      pair.append(source);
+    }
+
+    const translation = document.createElement('div');
+    translation.className = 'ot-selection-translation ot-pending';
+    if (settings.style.loadingStyle === 'apple') {
+      translation.classList.add('ot-loading-skeleton');
+      translation.style.setProperty('--ot-skeleton-width', `${Math.min(100, Math.max(24, text.length * 0.58))}%`);
+    } else {
+      translation.textContent = '翻译中…';
+    }
+    pair.append(translation);
+
+    if (anchor) anchor.insertAdjacentElement('afterend', pair);
+    else document.body.append(pair);
+    return translation;
   }
 
   async function translateSelection() {
@@ -677,37 +752,24 @@
       toast('请先选中一段文本');
       return;
     }
-    const rect = selection.getRangeAt(0).getBoundingClientRect();
-    closeBubble();
-    bubble = document.createElement('div');
-    bubble.className = 'ot-bubble';
-    if (settings.style.loadingStyle === 'apple') {
-      bubble.classList.add('ot-loading-apple', 'ot-loading-skeleton');
-      bubble.style.setProperty('--ot-skeleton-width', `${Math.min(100, Math.max(24, text.length * 0.58))}%`);
-    } else {
-      bubble.textContent = '翻译中…';
-    }
-    bubble.style.top = `${Math.min(window.innerHeight - 90, rect.bottom) + window.scrollY + 8}px`;
-    bubble.style.left = `${Math.max(8, Math.min(window.innerWidth - 340, rect.left)) + window.scrollX}px`;
-    document.body.append(bubble);
+    if (!selection.rangeCount) return;
+    // Clone the range up front: the user may change the selection while the
+    // request is in flight, and the insertion point must not move with it.
+    const range = selection.getRangeAt(0).cloneRange();
+    const translation = mountSelectionPair(range, text);
     try {
       const [result] = await requestTranslation([text.slice(0, 4000)]);
-      if (bubble) {
-        bubble.textContent = result || '没有可显示的译文';
-        bubble.classList.remove('ot-loading-apple', 'ot-loading-skeleton');
-        if (settings.style.loadingStyle === 'apple') bubble.classList.add('ot-result-reveal');
-      }
+      if (!translation.isConnected) return;
+      translation.classList.remove('ot-pending', 'ot-loading-skeleton', 'ot-error');
+      translation.textContent = result || '没有可显示的译文';
+      if (settings.style.loadingStyle === 'apple') translation.classList.add('ot-result-reveal');
     } catch (error) {
-      if (bubble) {
-        bubble.textContent = `翻译失败：${error.message}`;
-        bubble.classList.add('ot-error');
-      }
+      if (!translation.isConnected) return;
+      translation.classList.remove('ot-pending', 'ot-loading-skeleton');
+      translation.textContent = `翻译失败：${error.message}`;
+      translation.classList.add('ot-error');
     }
   }
-
-  document.addEventListener('mousedown', event => {
-    if (bubble && !bubble.contains(event.target)) closeBubble();
-  });
 
   // ---------------------------------------------------------------- subtitles
   //
@@ -1901,10 +1963,30 @@
 
   // ---------------------------------------------------------------- shortcuts
 
+  function isSingleKey(combo) {
+    return String(combo || '').split('+').filter(Boolean).length === 1;
+  }
+
+  // A bare key (e.g. "T") is convenient but would otherwise fire on every
+  // keystroke. Guard editable and interactive targets, IME composition and
+  // auto-repeat. Modifier combos keep their old, unrestricted behaviour.
+  function shortcutBlocked(event, combo) {
+    if (event.isComposing || event.keyCode === 229 || event.repeat) return true;
+    if (!isSingleKey(combo)) return false;
+    const target = event.target?.nodeType === 1 ? event.target : event.target?.parentElement;
+    if (!target) return false;
+    return Boolean(target.closest?.(
+      'input, textarea, select, [contenteditable]:not([contenteditable="false"]), ' +
+      '[role="textbox"], [role="combobox"], [role="searchbox"], ' +
+      'button, a[href], summary, [role="button"], [role="link"], [role="menuitem"]'
+    ));
+  }
+
   function matchShortcut(event, combo) {
     if (!combo) return false;
     const parts = String(combo).toLowerCase().split('+').map(part => part.trim()).filter(Boolean);
     const key = parts.pop();
+    if (!key) return false;
     const need = {
       alt: parts.includes('alt'),
       ctrl: parts.includes('ctrl'),
@@ -1916,18 +1998,18 @@
   }
 
   document.addEventListener('keydown', event => {
-    if (matchShortcut(event, settings.shortcuts.toggle)) {
+    const bindings = [
+      [settings.shortcuts.toggle, toggle],
+      [settings.shortcuts.selection, translateSelection],
+      [settings.subtitles.shortcut, toggleSubtitles]
+    ];
+    for (const [combo, action] of bindings) {
+      if (!combo || shortcutBlocked(event, combo) || !matchShortcut(event, combo)) continue;
       event.preventDefault();
-      toggle();
-    } else if (matchShortcut(event, settings.shortcuts.selection)) {
-      event.preventDefault();
-      translateSelection();
-    } else if (matchShortcut(event, settings.subtitles.shortcut)) {
-      event.preventDefault();
-      toggleSubtitles();
-    } else if (event.key === 'Escape') {
-      closeBubble();
+      action();
+      return;
     }
+    if (event.key === 'Escape') closeSelectionTranslations();
   });
 
   let touchGesture = null;

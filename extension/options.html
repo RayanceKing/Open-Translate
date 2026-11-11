@@ -172,12 +172,12 @@
         <div class="row shortcut-row">
           <div class="row-label">
             <label for="shortcut-toggle">翻译 / 还原快捷键</label>
-            <p>点击输入框后直接按下组合键，也可选择移动端三指或四指轻触。</p>
+            <p>点击输入框后直接按键，支持组合键或单个按键，也可选择移动端三指或四指轻触。</p>
           </div>
           <div class="row-control shortcut-controls">
             <input class="shortcut" id="shortcut-toggle" data-path="shortcuts.toggle" readonly placeholder="Alt+T">
             <select class="shortcut-choice" data-path="shortcuts.toggle" aria-label="移动端快捷方式">
-              <option value="">键盘组合键</option>
+              <option value="">键盘快捷键</option>
               <option value="Touch3">三指轻触</option>
               <option value="Touch4">四指轻触</option>
             </select>
@@ -186,10 +186,10 @@
         <div class="row">
           <div class="row-label">
             <label for="shortcut-selection">翻译选中文本</label>
-            <p>选中网页文字后按下即可弹出译文。</p>
+            <p>选中网页文字后按键，译文按双语对照紧贴原文下方显示。可设为单个按键（如 T），在输入框内打字不会触发。</p>
           </div>
           <div class="row-control">
-            <input class="shortcut" id="shortcut-selection" data-path="shortcuts.selection" readonly placeholder="Alt+Shift+T">
+            <input class="shortcut" id="shortcut-selection" data-path="shortcuts.selection" readonly placeholder="Alt+Shift+T 或单键 T">
           </div>
         </div>
       </div>
@@ -606,7 +606,7 @@
         <div class="card-title">这些数据会去哪里？</div>
         <ul class="bullets">
           <li>Google / MyMemory：请求发往其公共翻译端点，会被对方记录。</li>
-          <li>DeepL / Microsoft / LibreTranslate：只发送到你在设置里填写的服务。</li>
+          <li>DeepL / Microsoft / LibreTranslate：只发送到你在设置里填写的服务；DeepLX 只发往你自己的自托管实例。</li>
           <li>AI 引擎：整段文本会作为提示词发给模型提供方，请勿在敏感页面使用。</li>
           <li>所有密钥保存在 <code>chrome.storage.local</code>，仅本机可读。</li>
         </ul>
@@ -654,9 +654,9 @@
         <div class="card-title">快捷键</div>
         <ul class="bullets">
           <li><kbd id="kbd-toggle">Alt+T</kbd> 翻译 / 还原当前页面</li>
-          <li><kbd id="kbd-selection">Alt+Shift+T</kbd> 翻译当前选中的文本</li>
+          <li><kbd id="kbd-selection">Alt+Shift+T</kbd> 翻译当前选中的文本（可设为单键，译文内联显示在原文下方）</li>
           <li><kbd id="kbd-subtitles">Alt+S</kbd> 开关视频双语字幕</li>
-          <li><kbd>Esc</kbd> 关闭译文气泡</li>
+          <li><kbd>Esc</kbd> 清除所有划词译文</li>
         </ul>
       </div>
     </section>

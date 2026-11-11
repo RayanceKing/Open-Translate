@@ -272,14 +272,14 @@ function protectGlossary(texts, entries) {
   const ENGINE_NAMES = {
     auto: '自动',
     microsoft: 'Microsoft 翻译', google: 'Google 翻译',
-    mymemory: 'MyMemory', deepl: 'DeepL',
+    mymemory: 'MyMemory', deepl: 'DeepL', deeplx: 'DeepLX',
     libre: 'LibreTranslate', openai: 'OpenAI', deepseek: 'DeepSeek', gemini: 'Google Gemini', claude: 'Claude',
     custom: '自定义接口'
   };
 
   const ENGINE_SHORT = {
     auto: '自动',
-    google: 'Google', mymemory: 'MyMemory', deepl: 'DeepL', microsoft: '微软',
+    google: 'Google', mymemory: 'MyMemory', deepl: 'DeepL', deeplx: 'DeepLX', microsoft: '微软',
     libre: 'Libre', openai: 'OpenAI', deepseek: 'DeepSeek', gemini: 'Gemini', claude: 'Claude',
     custom: '自定义'
   };
@@ -290,6 +290,10 @@ function protectGlossary(texts, entries) {
     deepl: [
       { key: 'key', label: 'API Key', type: 'password', placeholder: 'xxxxxxxx:fx' },
       { key: 'pro', label: '使用 Pro 端点', type: 'switch' }
+    ],
+    deeplx: [
+      { key: 'url', label: '实例地址', type: 'text', placeholder: 'http://localhost:1188' },
+      { key: 'token', label: '访问令牌（可选）', type: 'password', placeholder: '服务端 -token / TOKEN 的值' }
     ],
     microsoft: [
       { key: 'useKey', label: '使用 Azure 密钥', type: 'switch' },
@@ -376,6 +380,7 @@ function protectGlossary(texts, entries) {
       auto: {},
       google: {}, mymemory: {},
       deepl: { key: '', pro: false },
+      deeplx: { url: '', token: '' },
       microsoft: { useKey: false, key: '', region: 'global' },
       libre: { url: '', key: '' },
       openai: { baseUrl: 'https://api.openai.com/v1', apiKey: '', model: 'gpt-4o-mini' },
@@ -401,7 +406,6 @@ function protectGlossary(texts, entries) {
   const originalHtml = new Map();
   let translating = new WeakSet();
   const translationSources = new WeakMap();
-  let bubble = null;
 
   // ---------------------------------------------------------------- settings
 
@@ -616,6 +620,89 @@ function protectGlossary(texts, entries) {
 
   const trimSlash = value => String(value || '').replace(/\/+$/, '');
 
+  // DeepLX / DLX: unofficial self-hosted DeepL bridge. POST /translate accepts
+  // an array and answers with a position-aligned array in `data`, but the
+  // anonymous oneshot channel caps the whole request at 1500 characters and
+  // answers HTTP 413 above that. Chunk by total length so long pages survive.
+  const DEEPLX_MAX_CHARS = 1400;
+  const DEEPLX_LANG = { 'zh-CN': 'ZH', 'zh-TW': 'ZH-HANT', en: 'EN-US', pt: 'PT-PT', ja: 'JA', ko: 'KO' };
+  const deeplxLang = code => DEEPLX_LANG[code] || String(code).toUpperCase();
+
+  function deeplxEndpoint(value) {
+    const base = trimSlash(String(value || '').trim()) || 'http://localhost:1188';
+    // Accept a bare instance URL or a full /translate (or /v1/translate) URL.
+    return /\/(?:v\d+\/)?translate$/i.test(base) ? base : `${base}/translate`;
+  }
+
+  function deeplxPieces(text, limit = DEEPLX_MAX_CHARS) {
+    const value = String(text ?? '');
+    if (value.length <= limit) return [value];
+    const sentences = value.match(/[^.!?。！？；;\n]+(?:[.!?。！？；;\n]+|$)|[.!?。！？；;\n]+/gu) || [value];
+    const pieces = [];
+    let current = '';
+    for (const sentence of sentences) {
+      if (sentence.length > limit) {
+        if (current) { pieces.push(current); current = ''; }
+        for (let i = 0; i < sentence.length; i += limit) pieces.push(sentence.slice(i, i + limit));
+        continue;
+      }
+      if (current && current.length + sentence.length > limit) { pieces.push(current); current = ''; }
+      current += sentence;
+    }
+    if (current) pieces.push(current);
+    return pieces;
+  }
+
+  async function deeplxRequest(chunks, cfg, target) {
+    const headers = { 'Content-Type': 'application/json' };
+    const token = String(cfg.token || '').trim();
+    if (token) headers.Authorization = `Bearer ${token}`;
+    const data = await http({
+      url: deeplxEndpoint(cfg.url),
+      method: 'POST',
+      headers,
+      data: JSON.stringify({ text: chunks, source_lang: 'auto', target_lang: deeplxLang(target) })
+    });
+    if (data?.code && Number(data.code) !== 200) {
+      throw new Error(`DeepLX 返回错误码 ${data.code}：${data.message || '未知错误'}`);
+    }
+    const raw = data?.data;
+    // Current DLX answers with `data` as a string or array; older forks wrap a
+    // single result in { result }.
+    const values = Array.isArray(raw) ? raw
+      : typeof raw === 'string' ? [raw]
+        : chunks.length === 1 && typeof raw?.result === 'string' ? [raw.result]
+          : null;
+    if (!values || values.length !== chunks.length) throw new Error('DeepLX 返回的译文数量不匹配');
+    return values.map(value => String(value ?? ''));
+  }
+
+  async function translateDeeplx(texts, cfg, target) {
+    const groups = texts.map(text => deeplxPieces(text));
+    const flat = groups.flat();
+    if (!flat.length) return [];
+    const batches = [];
+    let current = [];
+    let chars = 0;
+    for (const chunk of flat) {
+      if (current.length && chars + chunk.length > DEEPLX_MAX_CHARS) {
+        batches.push(current); current = []; chars = 0;
+      }
+      current.push(chunk);
+      chars += chunk.length;
+    }
+    if (current.length) batches.push(current);
+    // Self-hosted instances are usually single-process; keep fan-out low.
+    const translated = (await mapConcurrent(batches, 2, batch => deeplxRequest(batch, cfg, target))).flat();
+    if (translated.length !== flat.length) throw new Error('DeepLX 返回的译文数量不匹配');
+    let cursor = 0;
+    return groups.map(pieces => {
+      const value = translated.slice(cursor, cursor + pieces.length).join('');
+      cursor += pieces.length;
+      return value;
+    });
+  }
+
   function buildPrompt(texts, target, config) {
     const template = String(config.ai.prompt || '').trim() || DEFAULT_PROMPT;
     const head = template.replaceAll('{{target}}', LANG_LABEL[target] || target).replaceAll('{{source}}', 'the original language');
@@ -817,6 +904,8 @@ function protectGlossary(texts, entries) {
       const ids = ['google', 'mymemory'];
       if (!configured.microsoft?.useKey || configured.microsoft.key) ids.push('microsoft');
       if (configured.deepl?.key) ids.push('deepl');
+      // Only join the race when an instance was actually configured.
+      if (configured.deeplx?.url) ids.push('deeplx');
       if (configured.libre?.url) ids.push('libre');
       for (const id of ['openai', 'deepseek', 'gemini', 'claude']) {
         if (configured[id]?.apiKey) ids.push(id);
@@ -874,6 +963,8 @@ function protectGlossary(texts, entries) {
       });
       return (data?.translations || []).map(item => item.text);
     }
+
+    if (engine === 'deeplx') return translateDeeplx(texts, cfg, target);
 
     if (engine === 'microsoft') {
       if (!cfg.useKey) return microsoftFree(texts, target);
@@ -2264,11 +2355,83 @@ function protectGlossary(texts, entries) {
     if (document.body) observer.observe(document.body, { childList: true, subtree: true });
   }
 
-  // ---------------------------------------------------------------- selection bubble
+  // ---------------------------------------------------------------- selection
+  //
+  // Selection translation is rendered as an inline bilingual pair: the original
+  // stays where it is on the page and the translation is inserted immediately
+  // after the block holding the selection. That is the familiar reading order
+  // used by immersive/bilingual translation — no floating bubble covering the
+  // text that is being read.
 
-  function closeBubble() {
-    bubble?.remove();
-    bubble = null;
+  const SELECTION_MARK = 'selection';
+
+  function closeSelectionTranslations() {
+    document.querySelectorAll(`[${MARK}="${SELECTION_MARK}"]`).forEach(node => node.remove());
+  }
+
+  function selectionBlock(node) {
+    let el = node?.nodeType === 1 ? node : node?.parentElement;
+    while (el && el !== document.body && el !== document.documentElement) {
+      if (el.nodeType === 1) {
+        const display = getComputedStyle(el).display;
+        if (display && display !== 'inline' && !display.startsWith('inline')
+            && display !== 'contents' && display !== 'none') return el;
+      }
+      el = el.parentElement;
+    }
+    return null;
+  }
+
+  function mountSelectionPair(range, text) {
+    const startBlock = selectionBlock(range.startContainer);
+    const endBlock = selectionBlock(range.endContainer) || startBlock;
+    const anchor = endBlock || startBlock;
+
+    // Retranslating the same block replaces its previous pair, so repeated
+    // lookups never stack up. Pairs on other blocks stay visible.
+    let next = anchor?.nextElementSibling;
+    while (next?.getAttribute?.(MARK) === SELECTION_MARK) {
+      const stale = next;
+      next = next.nextElementSibling;
+      stale.remove();
+    }
+
+    const pair = document.createElement('div');
+    pair.className = 'ot-selection-pair';
+    pair.setAttribute(MARK, SELECTION_MARK);
+
+    const close = document.createElement('button');
+    close.type = 'button';
+    close.className = 'ot-selection-close';
+    close.setAttribute('aria-label', '关闭划词译文');
+    close.textContent = '×';
+    close.addEventListener('click', () => pair.remove());
+    pair.append(close);
+
+    // If the selection already covers a whole block, that block on the page IS
+    // the "original above" — echoing it again would read as duplicated text.
+    const coversWholeBlock = startBlock && startBlock === endBlock
+      && clean(startBlock.textContent) === clean(text);
+    if (!coversWholeBlock) {
+      const source = document.createElement('div');
+      source.className = 'ot-selection-source';
+      source.textContent = text;
+      pair.append(source);
+    }
+
+    const translation = document.createElement('div');
+    translation.className = 'ot-selection-translation ot-pending';
+    if (settings.style.loadingStyle === 'apple') {
+      translation.classList.add('ot-loading-skeleton');
+      translation.style.setProperty('--ot-skeleton-width', `${Math.min(100, Math.max(24, text.length * 0.58))}%`);
+    } else {
+      translation.textContent = '翻译中…';
+    }
+    pair.append(translation);
+
+    if (anchor) anchor.insertAdjacentElement('afterend', pair);
+    else document.body.append(pair);
+    return translation;
   }
 
   async function translateSelection() {
@@ -2278,36 +2441,24 @@ function protectGlossary(texts, entries) {
       toast('请先选中一段文本');
       return;
     }
-    const rect = selection.getRangeAt(0).getBoundingClientRect();
-    closeBubble();
-    bubble = document.createElement('div');
-    bubble.className = 'ot-bubble';
-    if (settings.style.loadingStyle === 'apple') {
-      bubble.classList.add('ot-loading-apple', 'ot-loading-skeleton');
-      bubble.style.setProperty('--ot-skeleton-width', `${Math.min(100, Math.max(24, text.length * 0.58))}%`);
-    }
-    bubble.textContent = '翻译中…';
-    bubble.style.top = `${Math.min(window.innerHeight - 90, rect.bottom) + window.scrollY + 8}px`;
-    bubble.style.left = `${Math.max(8, Math.min(window.innerWidth - 340, rect.left)) + window.scrollX}px`;
-    document.body.append(bubble);
+    if (!selection.rangeCount) return;
+    // Clone the range up front: the user may change the selection while the
+    // request is in flight, and the insertion point must not move with it.
+    const range = selection.getRangeAt(0).cloneRange();
+    const translation = mountSelectionPair(range, text);
     try {
       const [result] = await requestTranslation([text.slice(0, 4000)]);
-      if (bubble) {
-        bubble.textContent = result || '没有可显示的译文';
-        bubble.classList.remove('ot-loading-apple', 'ot-loading-skeleton');
-        if (settings.style.loadingStyle === 'apple') bubble.classList.add('ot-result-reveal');
-      }
+      if (!translation.isConnected) return;
+      translation.classList.remove('ot-pending', 'ot-loading-skeleton', 'ot-error');
+      translation.textContent = result || '没有可显示的译文';
+      if (settings.style.loadingStyle === 'apple') translation.classList.add('ot-result-reveal');
     } catch (error) {
-      if (bubble) {
-        bubble.textContent = `翻译失败：${error.message}`;
-        bubble.classList.add('ot-error');
-      }
+      if (!translation.isConnected) return;
+      translation.classList.remove('ot-pending', 'ot-loading-skeleton');
+      translation.textContent = `翻译失败：${error.message}`;
+      translation.classList.add('ot-error');
     }
   }
-
-  document.addEventListener('mousedown', event => {
-    if (bubble && !bubble.contains(event.target)) closeBubble();
-  });
 
   function toast(message) {
     const node = document.createElement('div');
@@ -2779,7 +2930,9 @@ function protectGlossary(texts, entries) {
               <option value="Touch3" ${settings.shortcuts.toggle === 'Touch3' ? 'selected' : ''}>三指轻触</option>
               <option value="Touch4" ${settings.shortcuts.toggle === 'Touch4' ? 'selected' : ''}>四指轻触</option>
             </select></div>
-            <p class="hint">邮箱、电话与常见 API Token 会在发送前替换为占位符，返回后还原。选中网页文字后可使用 Alt+Shift+T 翻译。</p>
+            <div class="field"><label>翻译选中文本快捷键</label><input type="text" data-k="shortcuts.selection" value="${escapeHtml(settings.shortcuts.selection)}" placeholder="Alt+Shift+T 或单键 T" spellcheck="false" autocomplete="off"></div>
+            <p class="hint">划词译文以双语对照内联显示在原文下方。快捷键支持组合键或单个按键（如 T）；在输入框内打字不会触发，按 Esc 可清除全部划词译文。</p>
+            <p class="hint">邮箱、电话与常见 API Token 会在发送前替换为占位符，返回后还原。</p>
           </div>
 
           <div class="pane" data-pane="style">
@@ -3134,6 +3287,25 @@ function protectGlossary(texts, entries) {
 
   // ---------------------------------------------------------------- shortcuts
 
+  function isSingleKey(combo) {
+    return String(combo || '').split('+').filter(Boolean).length === 1;
+  }
+
+  // A bare key (e.g. "T") is convenient but would otherwise fire on every
+  // keystroke. Guard editable and interactive targets, IME composition and
+  // auto-repeat. Modifier combos keep their old, unrestricted behaviour.
+  function shortcutBlocked(event, combo) {
+    if (event.isComposing || event.keyCode === 229 || event.repeat) return true;
+    if (!isSingleKey(combo)) return false;
+    const target = event.target?.nodeType === 1 ? event.target : event.target?.parentElement;
+    if (!target) return false;
+    return Boolean(target.closest?.(
+      'input, textarea, select, [contenteditable]:not([contenteditable="false"]), ' +
+      '[role="textbox"], [role="combobox"], [role="searchbox"], ' +
+      'button, a[href], summary, [role="button"], [role="link"], [role="menuitem"]'
+    ));
+  }
+
   function matchesShortcut(event, shortcut) {
     const combo = String(shortcut || '').toLowerCase();
     if (!combo) return false;
@@ -3148,22 +3320,21 @@ function protectGlossary(texts, entries) {
   }
 
   document.addEventListener('keydown', event => {
-    if (matchesShortcut(event, settings.subtitles.shortcut)) {
+    const bindings = [
+      [settings.shortcuts.toggle, toggle],
+      [settings.shortcuts.selection, translateSelection],
+      [settings.subtitles.shortcut, toggleSubtitles]
+    ];
+    for (const [combo, action] of bindings) {
+      if (!combo || shortcutBlocked(event, combo) || !matchesShortcut(event, combo)) continue;
       event.preventDefault();
-      toggleSubtitles();
+      action();
       return;
     }
-    const isToggle = matchesShortcut(event, settings.shortcuts.toggle);
-    if (!isToggle) {
-      if (event.key === 'Escape') {
-        closeBubble();
-        closeSettings();
-      }
-      return;
+    if (event.key === 'Escape') {
+      closeSelectionTranslations();
+      closeSettings();
     }
-    event.preventDefault();
-    if (event.shiftKey) translateSelection();
-    else toggle();
   });
 
   let touchGesture = null;
@@ -3216,8 +3387,7 @@ function protectGlossary(texts, entries) {
       .ot-hover-visible { display: inline-block !important; }
       .ot-pending { opacity: calc(var(--ot-op, 1) * .55); font-style: italic; }
       html.ot-loading-apple .ot-pending { position: relative; display: inline-block; }
-      html.ot-loading-apple .ot-loading-skeleton,
-      .ot-bubble.ot-loading-apple {
+      html.ot-loading-apple .ot-loading-skeleton {
         width: var(--ot-skeleton-width, 42%);
         min-width: 4em;
         height: 1.15em;
@@ -3227,8 +3397,7 @@ function protectGlossary(texts, entries) {
         background-size: 260% 100%;
         animation: ot-loading-shimmer 1.8s linear infinite;
       }
-      html.ot-loading-apple .ot-loading-skeleton::after,
-      .ot-bubble.ot-loading-apple::after {
+      html.ot-loading-apple .ot-loading-skeleton::after {
         content: '';
         position: absolute;
         inset: 12% 0;
@@ -3239,10 +3408,7 @@ function protectGlossary(texts, entries) {
         filter: blur(7px);
         animation: ot-loading-shimmer 1.8s linear infinite;
       }
-      html.ot-loading-apple .ot-result-reveal,
-      .ot-bubble.ot-result-reveal {
-        animation: ot-result-reveal .8s ease-out both;
-      }
+      .ot-result-reveal { animation: ot-result-reveal .8s ease-out both; }
       @keyframes ot-loading-shimmer { to { background-position: -260% 0; } }
       @keyframes ot-result-reveal {
         0% { opacity: 0; color: #ff68ad; }
@@ -3252,33 +3418,32 @@ function protectGlossary(texts, entries) {
       @media (prefers-reduced-motion: reduce) {
         html.ot-loading-apple .ot-loading-skeleton,
         html.ot-loading-apple .ot-loading-skeleton::after,
-        html.ot-loading-apple .ot-result-reveal,
-        .ot-bubble.ot-loading-skeleton { animation: none; }
-      }
-      .ot-bubble.ot-loading-skeleton {
-        width: var(--ot-skeleton-width, 42%);
-        min-width: 4em;
-        height: 1.15em;
-        padding: 0;
-        border-radius: .5em;
-        color: transparent;
-        background: linear-gradient(110deg, rgba(255,104,173,.65), rgba(103,172,255,.72), rgba(125,232,198,.68), rgba(255,214,102,.72), rgba(255,104,173,.65));
-        background-size: 260% 100%;
-        animation: ot-loading-shimmer 1.8s linear infinite;
-      }
-      .ot-bubble.ot-loading-skeleton::after {
-        content: '';
-        position: absolute;
-        inset: 12% 0;
-        z-index: -1;
-        border-radius: 999px;
-        background: rgba(103,172,255,.18);
-        filter: blur(7px);
+        .ot-result-reveal { animation: none; }
       }
       .ot-error { color: #d92d20 !important; border-color: rgba(217,45,32,.45) !important; background: rgba(217,45,32,.08) !important; }
-      .ot-bubble { position: absolute; z-index: 2147483647; max-width: 340px; padding: 10px 12px; border-radius: 10px;
-        background: #1b1b24; color: #f4f4f5; box-shadow: 0 12px 34px rgba(0,0,0,.34);
-        font: 14px/1.6 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; white-space: pre-wrap; }
+
+      /* ---------- inline selection translation: original above, translation below ---------- */
+      .ot-selection-pair { position: relative; display: block; box-sizing: border-box; width: 100%;
+        flex: 0 0 100%; grid-column: 1 / -1; margin: 6px 0 18px; padding: 0;
+        font-family: inherit; text-align: inherit; line-height: var(--ot-lh, 1.7); direction: inherit; }
+      .ot-selection-source, .ot-selection-translation { display: block; max-width: 100%; box-sizing: border-box;
+        white-space: pre-wrap; overflow-wrap: break-word; word-break: break-word;
+        -webkit-box-decoration-break: clone; box-decoration-break: clone; }
+      .ot-selection-source { margin: 0 0 3px; padding: 0 calc(var(--ot-px, 8px) + 24px) 0 var(--ot-px, 8px);
+        font-size: calc(1em * var(--ot-fs, 1) * .92); line-height: var(--ot-lh, 1.7);
+        color: var(--ot-color, inherit); opacity: calc(var(--ot-op, 1) * .58); }
+      .ot-selection-translation { margin: 0; padding: var(--ot-py, 2px) calc(var(--ot-px, 8px) + 24px) var(--ot-py, 2px) var(--ot-px, 8px);
+        border-radius: var(--ot-radius, 6px); font-size: calc(1em * var(--ot-fs, 1)); line-height: var(--ot-lh, 1.7);
+        color: var(--ot-color, inherit); opacity: var(--ot-op, 1); background: transparent; }
+      .ot-selection-translation.ot-pending { opacity: calc(var(--ot-op, 1) * .55); font-style: italic; }
+      html.ot-loading-apple .ot-selection-translation.ot-pending { position: relative; display: block; }
+      .ot-selection-close { position: absolute; top: 0; right: 0; z-index: 1; display: block;
+        width: 22px; height: 22px; margin: 0; padding: 0; border: 0; border-radius: 50%;
+        background: transparent; color: var(--ot-color, inherit); opacity: .32;
+        font: 16px/1 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        line-height: 22px; text-align: center; cursor: pointer; }
+      .ot-selection-pair:hover .ot-selection-close { opacity: .75; }
+      .ot-selection-close:hover { opacity: 1; }
       .ot-toast { position: fixed; top: 18px; left: 50%; transform: translateX(-50%); z-index: 2147483647;
         padding: 8px 14px; border-radius: 999px; background: rgba(24,24,32,.92); color: #fff;
         font: 13px/1.4 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }

@@ -111,6 +111,7 @@ export const DEFAULT_SETTINGS = {
     google: {},
     mymemory: {},
     deepl: { key: '', pro: false },
+    deeplx: { url: '', token: '' },
     microsoft: { useKey: false, key: '', region: 'global' },
     libre: { url: '', key: '' },
     apple: {},
@@ -188,7 +189,7 @@ export function normalizeSettings(raw) {
     String(raw.engines.microsoft.key || '').trim() !== '';
 
   const settings = mergeSettings(DEFAULT_SETTINGS, raw || {});
-  if (!['auto', 'google', 'mymemory', 'deepl', 'microsoft', 'libre', 'apple', 'openai', 'deepseek', 'gemini', 'claude', 'custom'].includes(settings.engine)) {
+  if (!['auto', 'google', 'mymemory', 'deepl', 'deeplx', 'microsoft', 'libre', 'apple', 'openai', 'deepseek', 'gemini', 'claude', 'custom'].includes(settings.engine)) {
     settings.engine = DEFAULT_SETTINGS.engine;
   }
   settings.version = APP_VERSION;

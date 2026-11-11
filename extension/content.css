@@ -122,8 +122,7 @@ html.ot-loading-apple .ot-loading-skeleton::after {
   animation: ot-loading-shimmer 1.8s linear infinite;
 }
 
-html.ot-loading-apple .ot-result-reveal,
-.ot-bubble.ot-result-reveal {
+.ot-result-reveal {
   animation: ot-result-reveal .8s ease-out both;
 }
 
@@ -140,33 +139,9 @@ html.ot-loading-apple .ot-result-reveal,
 @media (prefers-reduced-motion: reduce) {
   html.ot-loading-apple .ot-loading-skeleton,
   html.ot-loading-apple .ot-loading-skeleton::after,
-  html.ot-loading-apple .ot-result-reveal {
+  .ot-result-reveal {
     animation: none;
   }
-
-  .ot-bubble.ot-loading-skeleton { animation: none; }
-}
-
-.ot-bubble.ot-loading-skeleton {
-  width: var(--ot-skeleton-width, 42%);
-  min-width: 4em;
-  height: 1.15em;
-  padding: 0;
-  border-radius: 0.5em;
-  color: transparent;
-  background: linear-gradient(110deg, rgba(255, 104, 173, .65), rgba(103, 172, 255, .72), rgba(125, 232, 198, .68), rgba(255, 214, 102, .72), rgba(255, 104, 173, .65));
-  background-size: 260% 100%;
-  animation: ot-loading-shimmer 1.8s linear infinite;
-}
-
-.ot-bubble.ot-loading-skeleton::after {
-  content: '';
-  position: absolute;
-  inset: 12% 0;
-  z-index: -1;
-  border-radius: 999px;
-  background: rgba(103, 172, 255, .18);
-  filter: blur(7px);
 }
 
 .ot-error {
@@ -253,26 +228,93 @@ html.ot-loading-apple .ot-result-reveal,
   background: linear-gradient(140deg, #4a4763, #2f2d42);
 }
 
-/* ---------- selection bubble ---------- */
+/* ---------- inline selection translation ----------
+   The pair is inserted after the block holding the selection, so the original
+   reads first and the translation follows immediately underneath. It stays in
+   normal document flow and is removed with Escape / the close button. */
 
-.ot-bubble {
-  position: absolute;
-  z-index: 2147483647;
-  max-width: 340px;
-  padding: 10px 12px;
-  border-radius: 10px;
-  background: #1b1b24;
-  color: #f4f4f5;
-  box-shadow: 0 12px 34px rgba(0, 0, 0, 0.34);
-  font: 14px/1.6 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+.ot-selection-pair {
+  position: relative;
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  flex: 0 0 100%;
+  grid-column: 1 / -1;
+  margin: 6px 0 18px;
+  padding: 0;
+  font-family: inherit;
+  text-align: inherit;
+  line-height: var(--ot-lh, 1.7);
+  direction: inherit;
+}
+
+.ot-selection-source,
+.ot-selection-translation {
+  display: block;
+  max-width: 100%;
+  box-sizing: border-box;
   white-space: pre-wrap;
   overflow-wrap: break-word;
+  word-break: break-word;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
 }
 
-.ot-bubble.ot-error {
-  color: #ffb4ab !important;
-  background: #2a1616 !important;
+.ot-selection-source {
+  margin: 0 0 3px;
+  padding: 0 calc(var(--ot-px, 8px) + 24px) 0 var(--ot-px, 8px);
+  font-size: calc(1em * var(--ot-fs, 1) * 0.92);
+  line-height: var(--ot-lh, 1.7);
+  color: var(--ot-color, inherit);
+  opacity: calc(var(--ot-op, 1) * 0.58);
 }
+
+.ot-selection-translation {
+  margin: 0;
+  padding: var(--ot-py, 2px) calc(var(--ot-px, 8px) + 24px) var(--ot-py, 2px) var(--ot-px, 8px);
+  border-radius: var(--ot-radius, 6px);
+  font-size: calc(1em * var(--ot-fs, 1));
+  line-height: var(--ot-lh, 1.7);
+  color: var(--ot-color, inherit);
+  opacity: var(--ot-op, 1);
+  background: transparent;
+}
+
+.ot-selection-translation.ot-pending {
+  opacity: calc(var(--ot-op, 1) * 0.55);
+  font-style: italic;
+}
+
+/* The generic pending rule is inline-block for full-page translations; a
+   selection pair must still own a full line. */
+html.ot-loading-apple .ot-selection-translation.ot-pending {
+  position: relative;
+  display: block;
+}
+
+.ot-selection-close {
+  position: absolute;
+  top: 0;
+  right: 0;
+  z-index: 1;
+  display: block;
+  width: 22px;
+  height: 22px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--ot-color, inherit);
+  opacity: 0.32;
+  font: 16px/1 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  line-height: 22px;
+  text-align: center;
+  cursor: pointer;
+}
+
+.ot-selection-pair:hover .ot-selection-close { opacity: 0.75; }
+.ot-selection-close:hover { opacity: 1; }
 
 /* ---------- video subtitles ---------- */
 

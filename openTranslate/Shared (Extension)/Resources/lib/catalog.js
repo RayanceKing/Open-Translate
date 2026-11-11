@@ -36,6 +36,16 @@ const ENGINE_CATALOG_DATA = [
     ]
   },
   {
+    id: 'deeplx',
+    name: 'DeepLX',
+    tag: '自建',
+    note: '开源自托管的 DeepL 兼容服务（上游现名 DLX），无需官方 API Key。填写实例地址后即自动加入「自动」引擎；留空则不参与。',
+    fields: [
+      { key: 'url', label: '实例地址', type: 'text', placeholder: 'http://localhost:1188 或完整 /translate 地址' },
+      { key: 'token', label: '访问令牌（可选）', type: 'password', placeholder: '服务端 -token / TOKEN 的值' }
+    ]
+  },
+  {
     id: 'microsoft',
     name: 'Microsoft 翻译',
     tag: '免费',

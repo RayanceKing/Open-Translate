@@ -536,9 +536,25 @@ function bindShortcutInputs() {
       if (event.altKey) modifiers.push('Alt');
       if (event.shiftKey) modifiers.push('Shift');
       if (event.metaKey) modifiers.push('Meta');
-      const key = event.code?.startsWith('Key') ? event.code.slice(3) : event.key;
-      if (!modifiers.length || ['Alt', 'Control', 'Shift', 'Meta'].includes(event.key)) return;
-      const combo = [...modifiers, key.toUpperCase()].join('+');
+
+      // Single keys are allowed (e.g. "T" for selection translation). Reject
+      // only keys that cannot act as a shortcut on their own; the content
+      // script guards editable/interactive elements so typing never triggers it.
+      const ignoredKeys = [
+        'Alt', 'Control', 'Shift', 'Meta', 'AltGraph', 'CapsLock', 'Tab',
+        'Escape', 'Enter', 'Backspace', 'Delete', 'ContextMenu',
+        'Unidentified', 'Dead', 'Process', ' ', 'Spacebar', 'Compose'
+      ];
+      if (event.isComposing || ignoredKeys.includes(event.key)
+          || /^F\d{1,2}$/.test(event.key)
+          || /^(Arrow|Page|Home|End|Insert|PrintScreen|ScrollLock|Pause|NumLock)/.test(event.key)) return;
+
+      const code = event.code || '';
+      const rawKey = code.startsWith('Key') ? code.slice(3)
+        : code.startsWith('Digit') ? code.slice(5)
+          : event.key;
+      const key = String(rawKey).length === 1 ? rawKey.toUpperCase() : rawKey;
+      const combo = [...modifiers, key].join('+');
       input.value = combo;
       if (input.id === 'shortcut-toggle' && toggleChoice) toggleChoice.value = '';
       setPath(settings, input.dataset.path, combo);

@@ -171,6 +171,99 @@ const deepl = {
   }
 };
 
+// ---------------------------------------------------------------- DeepLX / DLX
+//
+// DeepLX (renamed "DLX" upstream in 2026) is an unofficial, self-hosted DeepL
+// bridge. POST /translate accepts an array of strings and returns a
+// position-aligned array in `data`, but the anonymous oneshot channel caps the
+// *whole request* at 1500 UTF-16 characters and answers HTTP 413 above that.
+// Chunk by total length here so a long page never trips the cap.
+
+const DEEPLX_MAX_CHARS = 1400;
+
+function deeplxEndpoint(value) {
+  const base = trimSlash(String(value || '').trim()) || 'http://localhost:1188';
+  // Accept either a bare instance URL or a full /translate (or /v1/translate)
+  // endpoint, which is what most DeepLX setup guides tell people to paste.
+  return /\/(?:v\d+\/)?translate$/i.test(base) ? base : `${base}/translate`;
+}
+
+// Split an oversized paragraph on sentence boundaries, keeping the trailing
+// punctuation/line break so the translated pieces can be joined back without
+// swallowing separators.
+function deeplxPieces(text, limit = DEEPLX_MAX_CHARS) {
+  const value = String(text ?? '');
+  if (value.length <= limit) return [value];
+  const sentences = value.match(/[^.!?。！？；;\n]+(?:[.!?。！？；;\n]+|$)|[.!?。！？；;\n]+/gu) || [value];
+  const pieces = [];
+  let current = '';
+  for (const sentence of sentences) {
+    if (sentence.length > limit) {
+      if (current) { pieces.push(current); current = ''; }
+      for (let i = 0; i < sentence.length; i += limit) pieces.push(sentence.slice(i, i + limit));
+      continue;
+    }
+    if (current && current.length + sentence.length > limit) { pieces.push(current); current = ''; }
+    current += sentence;
+  }
+  if (current) pieces.push(current);
+  return pieces;
+}
+
+async function deeplxRequest(chunks, config, target) {
+  const headers = { 'Content-Type': 'application/json' };
+  const token = String(config.token || '').trim();
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const data = await http(deeplxEndpoint(config.url), {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ text: chunks, source_lang: 'auto', target_lang: deeplLang(target) })
+  });
+  if (data?.code && Number(data.code) !== 200) {
+    throw new Error(`DeepLX 返回错误码 ${data.code}：${data.message || '未知错误'}`);
+  }
+  const raw = data?.data;
+  // Current DLX answers with `data` as a string or an array; some older forks
+  // wrap a single result in { result }.
+  const values = Array.isArray(raw) ? raw
+    : typeof raw === 'string' ? [raw]
+      : chunks.length === 1 && typeof raw?.result === 'string' ? [raw.result]
+        : null;
+  if (!values || values.length !== chunks.length) throw new Error('DeepLX 返回的译文数量不匹配');
+  return values.map(value => String(value ?? ''));
+}
+
+const deeplx = {
+  id: 'deeplx',
+  async translate({ texts, target, config }) {
+    const groups = texts.map(text => deeplxPieces(text));
+    const flat = groups.flat();
+    if (!flat.length) return [];
+    const batches = [];
+    let current = [];
+    let chars = 0;
+    for (const chunk of flat) {
+      if (current.length && chars + chunk.length > DEEPLX_MAX_CHARS) {
+        batches.push(current);
+        current = [];
+        chars = 0;
+      }
+      current.push(chunk);
+      chars += chunk.length;
+    }
+    if (current.length) batches.push(current);
+    // Self-hosted instances are usually single-process; keep fan-out low.
+    const translated = (await mapConcurrent(batches, 2, batch => deeplxRequest(batch, config, target))).flat();
+    if (translated.length !== flat.length) throw new Error('DeepLX 返回的译文数量不匹配');
+    let cursor = 0;
+    return groups.map(pieces => {
+      const value = translated.slice(cursor, cursor + pieces.length).join('');
+      cursor += pieces.length;
+      return value;
+    });
+  }
+};
+
 // Microsoft Translator ships two channels:
 //   free  — the same public endpoint the Bing translator page uses (token + key
 //           scraped from the page, valid for a while, no account needed)
@@ -370,6 +463,9 @@ function autoEngineIds(settings = {}) {
   if (!configured.microsoft?.useKey || String(configured.microsoft.key || '').trim()) ids.push('microsoft');
   if (isSafariExtension()) ids.push('apple');
   if (String(configured.deepl?.key || '').trim()) ids.push('deepl');
+  // Only join the race when an instance was actually configured; otherwise
+  // every user would fire a guaranteed-to-fail request at localhost:1188.
+  if (String(configured.deeplx?.url || '').trim()) ids.push('deeplx');
   if (String(configured.libre?.url || '').trim()) ids.push('libre');
   for (const id of ['openai', 'deepseek', 'gemini', 'claude']) {
     if (String(configured[id]?.apiKey || '').trim()) ids.push(id);
@@ -674,7 +770,7 @@ export async function visionOcrTranslate({ engine, image, source = 'auto', targe
 
 // ---------------------------------------------------------------- registry
 
-export const PROVIDERS = { google, mymemory, deepl, microsoft, libre, apple, openai, deepseek, gemini, claude, custom };
+export const PROVIDERS = { google, mymemory, deepl, deeplx, microsoft, libre, apple, openai, deepseek, gemini, claude, custom };
 
 export function hasProvider(id) {
   return Boolean(PROVIDERS[id]);
