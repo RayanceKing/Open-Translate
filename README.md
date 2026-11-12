@@ -1,68 +1,71 @@
-# Open Translate
+<p align="center">
+  <img src="icon-256@1x.png" width="120" alt="Open Translate 图标">
+</p>
 
-一个轻量的网页双语翻译工具，同时提供 **Tampermonkey 用户脚本** 和 **Manifest V3 浏览器扩展** 两种形态。它只处理文章与主内容中的可读文本块，在原文后就地插入译文，不会把整页导航、按钮和代码块一起翻掉。
+<h1 align="center">Open Translate</h1>
 
-设计思路参考 Immersive Translate（按段落双语对照、多引擎切换、样式预设）与 OpenImmersive Translator（直连引擎、隐私优先）。代码为独立实现，未复制其源码。
+<p align="center"><strong>轻量的网页双语翻译工具</strong><br>在原文下方就地插入译文，只翻正文，不翻导航、按钮和代码块。</p>
 
-## 快速开始
+<p align="center">
+  <a href="https://testflight.apple.com/join/6Vvybf3P"><strong>iOS / macOS 公测：加入 TestFlight →</strong></a>
+</p>
 
-### 方式一：Tampermonkey（推荐，Safari 亦可）
+<p align="center">
+  <a href="#界面预览">界面预览</a> ·
+  <a href="#三种形态">三种形态</a> ·
+  <a href="#亮点速览">亮点速览</a> ·
+  <a href="#功能">功能详解</a> ·
+  <a href="#隐私">隐私</a> ·
+  <a href="#安装与部署">安装与部署</a>
+</p>
 
-1. 在浏览器安装并启用 Tampermonkey，授予其访问目标站点的权限。
-2. 新建脚本，把 [`tampermonkey/open-translate.user.js`](tampermonkey/open-translate.user.js) 全部内容粘贴保存。
-3. 打开任意文章页，按 <kbd>Alt</kbd> + <kbd>T</kbd>，或点击屏幕边缘的悬浮球。
-4. 悬浮球可拖动，松手会自动吸附到最近的左右边缘并记住位置；上方的齿轮按钮随时打开设置。
-5. 点齿轮打开设置面板，可切换引擎、填写 API Key、调整译文样式。
-
-> Safari 的原生扩展不能直接加载 `.user.js`，Tampermonkey 是最省事的安装方式。
-
-### 方式二：浏览器扩展（Chrome / Edge / Firefox / Safari App Extension）
-
-**Chrome / Edge**
-
-1. 打开 `chrome://extensions`（Edge 为 `edge://extensions`），开启「开发者模式」。
-2. 选择「加载已解压的扩展程序」，指向仓库中的 [`extension/`](extension/) 目录。
-3. 点击工具栏图标打开快捷面板，或右键图标 →「选项」进入完整设置页。
-
-**Firefox 128+**
-
-Release 提供 `*-firefox.xpi` / `*-firefox.zip`（未签名），以及配置 AMO 凭证后额外产出的 `*-firefox-signed.xpi`（已签名，正式版 Firefox 可直接安装）。它们由 [`scripts/build-firefox.mjs`](scripts/build-firefox.mjs) 从同一份 `extension/` 源码生成，文件清单与 Chrome 包完全一致，只有 `manifest.json` 不同：Firefox 不支持 `background.service_worker`，改用 `background.scripts` 事件页（`type: "module"` 保留 ESM import），并补上 `browser_specific_settings.gecko`。因此**不能直接把 `extension/` 目录加载进 Firefox**。
-
-未签名包（临时加载）：
-
-1. 下载 `*-firefox.zip` 并解压（或本地执行 `node scripts/build-firefox.mjs` 自行生成）。
-2. 打开 `about:debugging#/runtime/this-firefox` →「临时加载附加组件」，选择解压目录中的 `manifest.json`（也可直接选 `.xpi`）。
-3. 安装弹窗里允许 `http://*/*`、`https://*/*` 的站点权限，否则内容脚本不会注入。
-4. 这种加载方式在浏览器重启后失效。
-
-签名包：直接打开 `*-firefox-signed.xpi` 即可在正式版 Firefox 中安装。签名版由 workflow 用 `web-ext sign` 生成，凭证配置见下方「打包与发布」一节。若只想在 Firefox 上用、不想装扩展，方式一的 Tampermonkey 脚本同样可用。
-
-Safari 14+ 可用 Xcode 的 **Safari Web Extension Converter** 导入 `extension/` 目录后签名运行。打包时请确认「Website Access」允许目标站点。
-
-### 方式三：Swift 原生应用（iOS / macOS）
-
-仓库内的 [`openTranslate/`](openTranslate/) 是 Swift + Safari Web Extension 原生工程，使用同一套 `extension/` 翻译逻辑，支持：
-
-- iOS 17+ 与 macOS 12+；
-- Safari 网页注入、弹出面板、完整设置页和本地术语库；
-- Apple 原生签名、归档与 App Store / TestFlight 分发；
-- macOS 沙盒与 Hardened Runtime，网络权限已在工程中启用。
-
-使用 Xcode 打开 [`openTranslate/openTranslate.xcodeproj`](openTranslate/openTranslate.xcodeproj)，选择 `openTranslate (iOS)` 或 `openTranslate (macOS)` scheme，设置自己的 Team 和 Bundle Identifier 后运行或 Archive。首次安装后需在 Safari 的「扩展」设置中启用 Open Translate，并授予目标网站访问权限。
-
-`openTranslate/Shared (Extension)/Resources/` 是 Safari 扩展打包副本；修改浏览器扩展后，请同步 `extension/` 中的资源，再重新构建原生工程。原生版本使用 Safari 兼容的 background scripts 配置，不依赖 Chrome 专有的 service worker 启动方式。
+---
 
 ## 界面预览
 
-蓝浅色主题下的界面效果：
+**双语对照翻译效果**（Wikipedia「Translation」条目，逐段在原文下方插入译文）
 
-**设置对话框（dialog）**
+![Open Translate 双语对照翻译演示](Translation-Display-optimized.gif)
+
+
+蓝浅色主题下的设置界面：
+
+**设置对话框（用户脚本）**
 
 ![设置对话框 - 蓝浅色主题](dialog-blue-light.png)
 
-**选项设置页（options）**
+**选项设置页（浏览器扩展）**
 
 ![选项设置页 - 蓝浅色主题](options-blue-light.png)
+
+## 三种形态
+
+同一套翻译逻辑，三种交付形态，按需选择：
+
+| 形态 | 适用环境 | 特点 |
+| --- | --- | --- |
+| Tampermonkey 用户脚本 | 任意支持用户脚本的浏览器（含 Safari） | 单文件、零构建、最省事 |
+| Manifest V3 浏览器扩展 | Chrome / Edge / Firefox | 工具栏快捷面板、完整设置页、右键菜单 |
+| Safari 原生 App | iOS 17+ / macOS 12+ | Xcode 工程，系统钥匙串存密钥、iCloud 同步设置；[TestFlight 公测](https://testflight.apple.com/join/6Vvybf3P) 可直接安装 |
+
+三种形态共享：段落级双语对照、11 个可切换引擎、AI 提示词与术语库、视频双语字幕、漫画图片翻译、会话级译文缓存、敏感信息脱敏。
+
+设计思路参考 Immersive Translate（按段落双语对照、多引擎切换、样式预设）与 OpenImmersive Translator（直连引擎、隐私优先）。代码为独立实现，未复制其源码。
+
+## 亮点速览
+
+| 能力 | 说明 |
+| --- | --- |
+| 段落级翻译 | 只处理文章与主内容的可读文本块，跳过导航 / 按钮 / 代码块 / 输入框；译文就地插在原文之后 |
+| 三种显示模式 | 双语对照（默认）、仅译文、悬停显示 |
+| 免密钥即可用 | Google / MyMemory / Microsoft 公共通道 + Index 翻译（B 站开源模型，免费、支持 150 种语言） |
+| 模型检测 | AI 引擎一键读取接口实际提供的模型，点击标签即可填入 |
+| 划词翻译 | `Alt + Shift + T` 或右键菜单，气泡内联显示，保留原文的链接与加粗格式 |
+| 视频双语字幕 | YouTube / `<track>` / WebVTT 三路来源，跟随播放进度按需翻译 |
+| 漫画模式 | 视觉模型识别图片文字并把译文叠回原图，Index 翻译免密钥开箱即用 |
+| 术语库 | 36 个内置领域库 + 自定义译法，AI 提示词与机器翻译占位符双通道 |
+| 样式与快捷键 | 8 种译文预设 + 逐项微调与实时预览、可拖动吸附的悬浮球、`Alt + T` 一键翻译 / 还原 |
+| 隐私优先 | 请求直连引擎、无中转无埋点、敏感信息脱敏、译文缓存不落盘 |
 
 ## 功能
 
@@ -169,7 +172,66 @@ YouTube 等站点会发送 `Content-Security-Policy: require-trusted-types-for '
 - 所有设置与密钥保存在浏览器本地（扩展为 `chrome.storage.local`，脚本为 GM 存储），仅本机可读。
 - 翻译缓存只保存译文与指纹，不保存原文，且不写入磁盘（`chrome.storage.session` / `sessionStorage`），关闭浏览器即消失。
 
-## 打包与发布（GitHub Actions）
+## 已知限制
+
+- 公共 Google 端点没有服务等级保证，部分网络环境可能无法访问。
+- 不翻译输入框、代码块、预格式化文本和自身生成的内容；复杂站点可在 `SITE_RULES` 中补充选择器。
+- 「仅译文」模式会临时替换段落 DOM，遇到极端动态页面还原后可能有轻微样式差异。
+- 生产发行建议把 `background.js` 中的公共端点替换为自建 LibreTranslate 或带密钥的正式服务。
+
+---
+
+## 安装与部署
+
+### 方式一：Tampermonkey（推荐，Safari 亦可）
+
+1. 在浏览器安装并启用 Tampermonkey，授予其访问目标站点的权限。
+2. 新建脚本，把 [`tampermonkey/open-translate.user.js`](tampermonkey/open-translate.user.js) 全部内容粘贴保存。
+3. 打开任意文章页，按 <kbd>Alt</kbd> + <kbd>T</kbd>，或点击屏幕边缘的悬浮球。
+4. 悬浮球可拖动，松手会自动吸附到最近的左右边缘并记住位置；上方的齿轮按钮随时打开设置。
+5. 点齿轮打开设置面板，可切换引擎、填写 API Key、调整译文样式。
+
+> Safari 的原生扩展不能直接加载 `.user.js`，Tampermonkey 是最省事的安装方式。
+
+### 方式二：浏览器扩展（Chrome / Edge / Firefox / Safari App Extension）
+
+**Chrome / Edge**
+
+1. 打开 `chrome://extensions`（Edge 为 `edge://extensions`），开启「开发者模式」。
+2. 选择「加载已解压的扩展程序」，指向仓库中的 [`extension/`](extension/) 目录。
+3. 点击工具栏图标打开快捷面板，或右键图标 →「选项」进入完整设置页。
+
+**Firefox 128+**
+
+Release 提供 `*-firefox.xpi` / `*-firefox.zip`（未签名），以及配置 AMO 凭证后额外产出的 `*-firefox-signed.xpi`（已签名，正式版 Firefox 可直接安装）。它们由 [`scripts/build-firefox.mjs`](scripts/build-firefox.mjs) 从同一份 `extension/` 源码生成，文件清单与 Chrome 包完全一致，只有 `manifest.json` 不同：Firefox 不支持 `background.service_worker`，改用 `background.scripts` 事件页（`type: "module"` 保留 ESM import），并补上 `browser_specific_settings.gecko`。因此**不能直接把 `extension/` 目录加载进 Firefox**。
+
+未签名包（临时加载）：
+
+1. 下载 `*-firefox.zip` 并解压（或本地执行 `node scripts/build-firefox.mjs` 自行生成）。
+2. 打开 `about:debugging#/runtime/this-firefox` →「临时加载附加组件」，选择解压目录中的 `manifest.json`（也可直接选 `.xpi`）。
+3. 安装弹窗里允许 `http://*/*`、`https://*/*` 的站点权限，否则内容脚本不会注入。
+4. 这种加载方式在浏览器重启后失效。
+
+签名包：直接打开 `*-firefox-signed.xpi` 即可在正式版 Firefox 中安装。签名版由 workflow 用 `web-ext sign` 生成，凭证配置见下方「打包与发布」一节。若只想在 Firefox 上用、不想装扩展，方式一的 Tampermonkey 脚本同样可用。
+
+Safari 14+ 可用 Xcode 的 **Safari Web Extension Converter** 导入 `extension/` 目录后签名运行。打包时请确认「Website Access」允许目标站点。
+
+### 方式三：Swift 原生应用（iOS / macOS）
+
+> **直接体验（无需 Xcode）**：[加入 TestFlight 公测](https://testflight.apple.com/join/6Vvybf3P)。用 TestFlight 安装后，到 Safari「设置 → 扩展」启用 Open Translate 并授予网站访问权限即可。下方是自行构建工程的方法。
+
+仓库内的 [`openTranslate/`](openTranslate/) 是 Swift + Safari Web Extension 原生工程，使用同一套 `extension/` 翻译逻辑，支持：
+
+- iOS 17+ 与 macOS 12+；
+- Safari 网页注入、弹出面板、完整设置页和本地术语库；
+- Apple 原生签名、归档与 App Store / TestFlight 分发；
+- macOS 沙盒与 Hardened Runtime，网络权限已在工程中启用。
+
+使用 Xcode 打开 [`openTranslate/openTranslate.xcodeproj`](openTranslate/openTranslate.xcodeproj)，选择 `openTranslate (iOS)` 或 `openTranslate (macOS)` scheme，设置自己的 Team 和 Bundle Identifier 后运行或 Archive。首次安装后需在 Safari 的「扩展」设置中启用 Open Translate，并授予目标网站访问权限。
+
+`openTranslate/Shared (Extension)/Resources/` 是 Safari 扩展打包副本；修改浏览器扩展后，请同步 `extension/` 中的资源，再重新构建原生工程。原生版本使用 Safari 兼容的 background scripts 配置，不依赖 Chrome 专有的 service worker 启动方式。
+
+### 打包与发布（GitHub Actions）
 
 [`.github/workflows/pack-crx.yml`](.github/workflows/pack-crx.yml) 在推送 `main`、打任意 tag 或手动触发时构建；打 tag 时还会把产物挂到同名 GitHub Release。每次产出：
 
@@ -181,26 +243,8 @@ YouTube 等站点会发送 `Content-Security-Policy: require-trusted-types-for '
 | `open-translate.user.js` | 油猴脚本 |
 | `SHA256SUMS.txt` | 以上全部产物的校验和 |
 
-### 仓库 Secrets
 
-| Secret | 用途 | 不配置的后果 |
-| --- | --- | --- |
-| `CRX_PRIVATE_KEY` | Chrome `.crx` 签名私钥（PEM 的 base64），用于固定扩展 ID | 每次构建临时生成密钥，扩展 ID 会变 |
-| `AMO_JWT_ISSUE` | AMO 开发者后台的 **JWT Issuer**，传给 `web-ext sign --api-key` | 跳过 AMO 签名，只发布未签名 XPI |
-| `AMO_JWT_SECRET` | AMO 开发者后台的 **JWT Secret**，传给 `--api-secret` | 同上 |
-
-> JWT 凭证在 [addons.mozilla.org 开发者中心](https://addons.mozilla.org/developers/addon/api/key/) 生成。该字段官方叫 JWT **Issuer**；workflow 也兼容把 Secret 存成 `AMO_JWT_ISSUER`。
-
-**当前状态：AMO 凭证尚未申请下来**，所以现在打 tag 只会发布未签名 XPI，构建不会失败，日志里会显示「跳过 AMO 签名」的提示。凭证配好后无需改 workflow，下次打 tag 会自动签名。
-
-签名的几个约定：
-
-- 只在 **tag 构建**执行，日常 `main` 提交不会向 AMO 提交版本。
-- 使用 `--channel unlisted`：不进入 AMO 商店公开列表，只取回可自行分发的签名包。若要上架公开列表，把 workflow 里的 `--channel` 改为 `listed`（届时还需补齐商店元数据并通过审核）。
-- AMO 不允许同一 add-on 重复提交同一版本号。重跑同一 tag 前请先升 `extension/manifest.json` 的版本号；签名失败也不会阻断其余产物发布。
-- 缺凭证、AMO 报错、签名结果异常（缺少 `META-INF` 签名块）都只产生 notice / warning，Release 与 Artifacts 照常发布，构建摘要里会写明签名状态。
-
-## 项目结构
+### 项目结构
 
 ```
 extension/
@@ -224,13 +268,6 @@ tampermonkey/
 ```
 
 零依赖、原生 JavaScript。修改后重新加载扩展或脚本即可生效。
-
-## 已知限制
-
-- 公共 Google 端点没有服务等级保证，部分网络环境可能无法访问。
-- 不翻译输入框、代码块、预格式化文本和自身生成的内容；复杂站点可在 `SITE_RULES` 中补充选择器。
-- 「仅译文」模式会临时替换段落 DOM，遇到极端动态页面还原后可能有轻微样式差异。
-- 生产发行建议把 `background.js` 中的公共端点替换为自建 LibreTranslate 或带密钥的正式服务。
 
 ## 许可
 
