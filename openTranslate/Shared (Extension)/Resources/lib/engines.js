@@ -8,6 +8,40 @@ import { formatGlossary } from './glossary.js';
 
 const TIMEOUT = 25000;
 
+// Safari can inject a native HTTP transport (see background.js). When present,
+// requests to B站's public Index-Translate API are issued by the app extension's
+// URLSession instead of the browser, so no `Origin: safari-web-extension://…`
+// header ever reaches the WAF. Other clients never register a transport and
+// keep using fetch + the narrowly scoped DNR rule below.
+let nativeHttpTransport = null;
+const NATIVE_FORWARD_HOSTS = [/^index-translate\.bilibili\.com$/i];
+const MAX_NATIVE_BODY = 2 * 1024 * 1024;
+
+/** Register (or clear) the native relay. Safari background script only. */
+export function setNativeHttpTransport(fn) {
+  nativeHttpTransport = typeof fn === 'function' ? fn : null;
+}
+
+function shouldForwardViaNative(url, options) {
+  if (!nativeHttpTransport) return false;
+  let host = '';
+  try { host = new URL(url).hostname; } catch { return false; }
+  if (!NATIVE_FORWARD_HOSTS.some(pattern => pattern.test(host))) return false;
+  // plist-based native messages are not designed for multi-megabyte payloads.
+  const body = options.body;
+  return typeof body !== 'string' || body.length <= MAX_NATIVE_BODY;
+}
+
+function parseNativeReply(reply) {
+  // Swift returns both the raw JSON text and a plist-safe dictionary. Prefer the
+  // raw text: plist cannot represent NSNull, so the dictionary folds nulls to
+  // empty strings and would silently lose information.
+  if (reply?.raw) {
+    try { return JSON.parse(reply.raw); } catch { /* fall through */ }
+  }
+  return reply?.data ?? reply?.raw ?? null;
+}
+
 // FluentRead-style batching: bound every request by BOTH segment count and
 // character count. Exceeding either limit starts another sub-batch; an
 // oversized single segment stays intact (never truncated). Small sub-batches
@@ -52,6 +86,28 @@ async function mapConcurrent(items, limit, worker) {
 }
 
 async function http(url, options = {}, timeout = TIMEOUT) {
+  if (shouldForwardViaNative(url, options)) {
+    try {
+      const reply = await nativeHttpTransport({
+        url,
+        method: options.method || 'GET',
+        headers: options.headers || {},
+        body: typeof options.body === 'string' ? options.body : null,
+        timeout: 10
+      });
+      return parseNativeReply(reply);
+    } catch (error) {
+      if (error?.otNative) {
+        const status = error.status || 0;
+        // Deliberately no fetch fallback: a browser fetch to this host is
+        // exactly the request the WAF rejects with 412.
+        throw new Error(status
+          ? describeError(status, error.data, error.rawBody || '', url)
+          : `原生转发失败：${error.message}`);
+      }
+      throw error;
+    }
+  }
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeout);
   try {
@@ -79,7 +135,7 @@ async function http(url, options = {}, timeout = TIMEOUT) {
 // (chrome-extension://, safari-web-extension://, moz-extension://). The public
 // API is keyless and works from a normal origin; upstream recommends a local
 // bridge proxy for extensions. Give an actionable hint instead of dumping HTML.
-export const INDEX_TRANSLATE_412 = 'B 站安全风控拒绝了浏览器扩展发起的请求（HTTP 412）：公共接口不接受扩展来源的 Origin。请把「接口地址」改为官方本地桥接代理 http://127.0.0.1:8080/v1（运行 python inference/llm/call_api.py --serve），或改为自建 vLLM 地址；油猴脚本不受此限制。';
+export const INDEX_TRANSLATE_412 = 'B 站安全风控拒绝了本次请求（HTTP 412）。Safari 原生版已自动改由 App 的网络层转发（请求不带浏览器扩展的 Origin）；若仍被拦截，可能是公共接口临时限流，请把「接口地址」改为官方本地桥接代理 http://127.0.0.1:8080/v1（运行 python inference/llm/call_api.py --serve），或改为自建 vLLM 地址；油猴脚本不受此限制。';
 
 function describeError(status, data, raw, url = '') {
   const text = String(raw || '');
@@ -101,9 +157,10 @@ function describeError(status, data, raw, url = '') {
 // safari-web-extension://) to requests started from the background page. B站's
 // WAF answers those with an HTML 412 risk-control page even though the public
 // API is free and keyless. A narrowly scoped dynamic DNR rule drops just that
-// header for this single host. Safari does not apply modifyHeaders to
-// extension-initiated requests, so the actionable 412 hint above remains the
-// fallback there (and on any browser where DNR is unavailable).
+// header for this single host (Chromium only). Safari does not apply
+// modifyHeaders to extension-initiated requests, so the Safari build registers
+// a native HTTP transport instead and relays these calls through URLSession
+// in the app extension (no browser Origin at all).
 const INDEX_DNR_RULE_ID = 1;
 export async function installIndexTranslateHeaderRule() {
   const dnr = typeof chrome !== 'undefined' ? chrome.declarativeNetRequest : null;

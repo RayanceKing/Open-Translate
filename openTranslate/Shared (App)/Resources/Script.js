@@ -6,10 +6,10 @@ function show(platform, enabled, useSettingsInsteadOfPreferences) {
         const off = document.querySelector('.platform-mac.state-off');
         const unknown = document.querySelector('.platform-mac.state-unknown');
         const preferences = document.querySelector('.platform-mac.open-preferences');
-        if (on) on.innerText = "openTranslate’s extension is currently on. You can turn it off in the Extensions section of Safari Settings.";
-        if (off) off.innerText = "openTranslate’s extension is currently off. You can turn it on in the Extensions section of Safari Settings.";
-        if (unknown) unknown.innerText = "You can turn on openTranslate’s extension in the Extensions section of Safari Settings.";
-        if (preferences) preferences.innerText = "Quit and Open Safari Settings…";
+        if (on) on.innerText = "OpenTranslate 的拓展已启用。您可以在Safari设置中的扩展功能部分关闭它。";
+        if (off) off.innerText = "OpenTranslate 的拓展已关闭。您可以在Safari设置中的扩展功能部分开启它。";
+        if (unknown) unknown.innerText = "您可以在Safari设置中的扩展功能区开启OpenTranslate扩展功能.";
+        if (preferences) preferences.innerText = "退出并打开 Safari 扩展…";
     }
 
     if (typeof enabled === "boolean") {

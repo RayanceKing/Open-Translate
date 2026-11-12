@@ -45,6 +45,16 @@ class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
             return
         }
 
+        // Relay an HTTP request through this native process. B站's WAF answers
+        // browser-extension requests (Origin: safari-web-extension://…) with an
+        // HTML 412 page; a URLSession request has no such header.
+        // iOS/iPadOS cannot push from the app into the extension, so this is
+        // always a strict request/reply round-trip initiated by the extension.
+        if message?["type"] as? String == "http" {
+            handleNetworkRequest(message, context: context)
+            return
+        }
+
         // Secrets (API keys) live in the system Keychain — never in iCloud.
         if message?["type"] as? String == "secret" {
             handleSecret(message, context: context)
@@ -98,14 +108,153 @@ class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
         }
     }
 
+    /// Wrap the reply dictionary in an NSExtensionItem and hand it back to the
+    /// calling background script. This is the ONLY reply channel available to a
+    /// Safari app extension; the app can never initiate a message on its own.
     private func complete(context: NSExtensionContext, reply: [String: Any]) {
+        Self.reply(context: context, with: reply)
+    }
+
+    /// Static so URLSession callbacks can finish a request without capturing a
+    /// non-Sendable `self` across the concurrency boundary.
+    private static func reply(context: NSExtensionContext, with fields: [String: Any]) {
         let response = NSExtensionItem()
         if #available(iOS 15.0, macOS 11.0, *) {
-            response.userInfo = [SFExtensionMessageKey: reply]
+            response.userInfo = [SFExtensionMessageKey: fields]
         } else {
-            response.userInfo = ["message": reply]
+            response.userInfo = ["message": fields]
         }
         context.completeRequest(returningItems: [response], completionHandler: nil)
+    }
+
+    // MARK: - Native HTTP forwarding
+
+    private static let forwardHosts: Set<String> = ["index-translate.bilibili.com"]
+    private static let forwardMethods: Set<String> = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"]
+    // Whitelist only. Origin / Referer / User-Agent / Sec-Fetch-* never cross
+    // the JS -> Swift boundary, so no browser-extension fingerprint is copied.
+    private static let allowedRequestHeaders: Set<String> = [
+        "content-type", "authorization", "accept", "accept-language"
+    ]
+    private static let requestTimeout: TimeInterval = 10
+
+    /// An honest native-App identifier. Never spoof a browser or another app.
+    private static let appUserAgent: String = {
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0"
+        #if os(iOS)
+        return "OpenTranslate/\(version) (iOS; SafariExtension)"
+        #else
+        return "OpenTranslate/\(version) (macOS; SafariExtension)"
+        #endif
+    }()
+
+    private func handleNetworkRequest(_ message: [String: Any]?, context: NSExtensionContext) {
+        guard let payload = message else {
+            complete(context: context, reply: ["error": "缺少原生转发参数", "status": 0])
+            return
+        }
+        let contextBox = ExtensionContextBox(context)
+        performNativeRequest(payload: payload) { reply in
+            let replyBox = NativeReplyBox(reply)
+            Task { @MainActor in
+                Self.reply(context: contextBox.value, with: replyBox.value)
+            }
+        }
+    }
+
+    /// Build a plain native request, issue it with URLSession.shared, and hand
+    /// the upstream JSON back to the extension. `completion` runs exactly once.
+    private func performNativeRequest(payload: [String: Any],
+                                      completion: @escaping @Sendable ([String: Any]) -> Void) {
+        guard let rawURL = payload["url"] as? String,
+              let url = URL(string: rawURL),
+              let scheme = url.scheme?.lowercased(), ["http", "https"].contains(scheme),
+              let host = url.host?.lowercased(), Self.forwardHosts.contains(host) else {
+            completion(["error": "原生转发仅支持白名单内的接口地址", "status": 0])
+            return
+        }
+        let method = (payload["method"] as? String ?? "GET").uppercased()
+        guard Self.forwardMethods.contains(method) else {
+            completion(["error": "不支持的 HTTP 方法: \(method)", "status": 0])
+            return
+        }
+        let requested = (payload["timeout"] as? NSNumber)?.doubleValue ?? Self.requestTimeout
+        let seconds = min(30.0, max(1.0, requested))
+
+        var request = URLRequest(url: url,
+                                 cachePolicy: .reloadIgnoringLocalCacheData,
+                                 timeoutInterval: seconds)
+        request.httpMethod = method
+        // URLSession.shared uses URLSessionConfiguration.default, whose
+        // httpAdditionalHeaders is nil. We never assign it. URLRequest's own
+        // timeoutInterval overrides the session's 60s default.
+        // The whitelist below makes it impossible for a caller to inject an
+        // Origin / Referer / Sec-Fetch-* or an extension User-Agent.
+        for (name, value) in (payload["headers"] as? [String: String] ?? [:]) {
+            guard Self.allowedRequestHeaders.contains(name.lowercased()) else { continue }
+            request.setValue(value, forHTTPHeaderField: name)
+        }
+        if request.value(forHTTPHeaderField: "Content-Type") == nil {
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        }
+        request.setValue(Self.appUserAgent, forHTTPHeaderField: "User-Agent")
+        if method != "GET" && method != "HEAD", let body = payload["body"] as? String {
+            request.httpBody = Data(body.utf8)
+        }
+
+        os_log(.default, "Native HTTP relay: %@ %@", method, url.absoluteString)
+
+        let task = URLSession.shared.dataTask(with: request) { data, response, error in
+            if let error = error as? URLError, error.code == .timedOut {
+                completion(["error": "原生网络请求超时（\(Int(seconds)) 秒）", "status": 0])
+                return
+            }
+            if let error = error {
+                completion(["error": "原生网络请求失败：\(error.localizedDescription)", "status": 0])
+                return
+            }
+            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            let body = data ?? Data()
+            let snippet = String(decoding: body.prefix(2048), as: UTF8.self)
+            guard (200...299).contains(status) else {
+                var reply: [String: Any] = [
+                    "error": "HTTP \(status)",
+                    "status": status,
+                    "body": snippet
+                ]
+                if status == 412 {
+                    reply["error"] = "HTTP 412：B 站风控仍拦截了原生请求，请稍后重试或改用本地桥接 / 自建端点"
+                }
+                completion(reply)
+                return
+            }
+            guard !body.isEmpty,
+                  let json = try? JSONSerialization.jsonObject(with: body, options: .fragmentsAllowed) else {
+                completion(["error": "接口返回的不是合法 JSON", "status": status, "body": snippet])
+                return
+            }
+            // NSExtensionItem.userInfo is plist-backed and cannot carry NSNull.
+            // `raw` is the lossless JSON text channel; `data` is a cleaned JSON
+            // dictionary so the reply is still a plain JSON object.
+            completion([
+                "ok": true,
+                "status": status,
+                "data": Self.plistSafe(json),
+                "raw": String(decoding: body, as: UTF8.self)
+            ])
+        }
+        task.resume()
+    }
+
+    private static func plistSafe(_ value: Any) -> Any {
+        if value is NSNull { return "" }
+        if let dictionary = value as? [String: Any] {
+            var result: [String: Any] = [:]
+            for (key, nested) in dictionary { result[key] = plistSafe(nested) }
+            return result
+        }
+        if let array = value as? [Any] { return array.map(plistSafe) }
+        return value
     }
 
     // MARK: - Secrets (system Keychain)
@@ -390,6 +539,16 @@ private final class ExtensionContextBox: @unchecked Sendable {
     let value: NSExtensionContext
 
     init(_ value: NSExtensionContext) {
+        self.value = value
+    }
+}
+
+/// URLSession callbacks arrive on a background queue; this box carries the
+/// plist-safe reply dictionary back to the main actor without losing it.
+private final class NativeReplyBox: @unchecked Sendable {
+    let value: [String: Any]
+
+    init(_ value: [String: Any]) {
         self.value = value
     }
 }

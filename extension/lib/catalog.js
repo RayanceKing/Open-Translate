@@ -134,7 +134,7 @@ const ENGINE_CATALOG_DATA = [
     id: 'indextranslate',
     name: 'Index 翻译',
     tag: 'AI',
-    note: 'B 站开源的 Index-Translate 翻译模型，兼容 OpenAI 接口，无需密钥即可免费使用，支持 150 种语言，对中文与网络用语友好；原生视觉编码器同时支持图片翻译，可在「漫画模式」里选作视觉引擎。浏览器扩展直连公共接口可能被 B 站风控拦截（HTTP 412）；此时请点「检测模型」查看提示，或把接口地址改为官方本地桥接 http://127.0.0.1:8080/v1（运行 python inference/llm/call_api.py --serve）、或自建 vLLM http://127.0.0.1:8000/v1。',
+    note: 'B 站开源的 Index-Translate 翻译模型，兼容 OpenAI 接口，无需密钥即可免费使用，支持 150 种语言，对中文与网络用语友好；原生视觉编码器同时支持图片翻译，可在「漫画模式」里选作视觉引擎。Safari 原生版会把该接口的请求交给 App 的网络层（URLSession）转发，不携带浏览器扩展的 Origin，可避开 B 站风控的 HTTP 412；浏览器扩展直连仍可能被拦截，此时请把接口地址改为官方本地桥接 http://127.0.0.1:8080/v1（运行 python inference/llm/call_api.py --serve）、或自建 vLLM http://127.0.0.1:8000/v1。',
     fields: [
       { key: 'baseUrl', label: '接口地址', type: 'text', placeholder: 'https://index-translate.bilibili.com/v1' },
       { key: 'apiKey', label: 'API Key（可选）', type: 'password', placeholder: '可留空' },

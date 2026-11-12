@@ -4,13 +4,49 @@ import {
   visionOcrTranslate,
   VISION_ENGINES,
   detectModels,
-  installIndexTranslateHeaderRule
+  installIndexTranslateHeaderRule,
+  setNativeHttpTransport
 } from './lib/engines.js';
 import { maskAll } from './lib/privacy.js';
 import { AI_ENGINES, SECRET_FIELDS } from './lib/defaults.js';
-import { nativeSend } from './lib/native.js';
+import { nativeSend, sendViaNativeApp as nativeHttpRequest } from './lib/native.js';
 import { cacheKey, readCache, writeCache, clearCache, cacheStats } from './lib/cache.js';
 import { resolveGlossary, glossarySalt, protectGlossary } from './lib/glossary.js';
+
+// -------------------------------------------------------------------------
+// Native HTTP relay (Safari only)
+//
+// iOS/iPadOS cannot push a message from the native app into a Safari extension,
+// so every exchange is strict request/reply: the background page calls
+// runtime.sendNativeMessage first, and SafariWebExtensionHandler answers via an
+// NSExtensionItem. Only the background page may call sendNativeMessage, so the
+// provider layer receives this function through dependency injection.
+// -------------------------------------------------------------------------
+const NATIVE_FORWARD_HOST = 'index-translate.bilibili.com';
+
+async function sendViaNativeApp(payload) {
+  // Second line of defence: engines.js already scopes the relay to the Index
+  // host, but the native relay must never become a general-purpose open proxy.
+  let host = '';
+  try { host = new URL(payload?.url || '').hostname.toLowerCase(); } catch {}
+  if (host !== NATIVE_FORWARD_HOST) {
+    throw new Error(`原生转发仅允许 ${NATIVE_FORWARD_HOST}`);
+  }
+  const started = Date.now();
+  try {
+    const reply = await nativeHttpRequest(payload);
+    console.debug?.(`Open Translate: native HTTP ${reply.status} in ${Date.now() - started} ms`);
+    return reply;
+  } catch (error) {
+    if (error?.otNative) throw error;
+    const wrapped = new Error(`原生转发失败：${error?.message || '未知错误'}`);
+    wrapped.otNative = true;
+    wrapped.status = 0;
+    throw wrapped;
+  }
+}
+
+setNativeHttpTransport(sendViaNativeApp);
 
 // Safari-only extension. API keys (secrets) live in the system Keychain and are
 // reached through the native app extension (see SafariWebExtensionHandler). We
@@ -224,6 +260,13 @@ chrome.runtime.onMessage.addListener((message, _sender, respond) => {
         }
         respond(reply || {});
       })
+      .catch(fail);
+    return true;
+  }
+  // Diagnostics: exercise the native relay without running a translation.
+  if (message?.type === 'native-http') {
+    sendViaNativeApp(message.payload || {})
+      .then(reply => respond({ ok: true, status: reply.status }))
       .catch(fail);
     return true;
   }

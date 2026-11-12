@@ -81,17 +81,18 @@
 | DeepLX | 自建 | 开源自托管的 DeepL 兼容服务（上游现名 DLX），无需官方 Key；填写实例地址后自动加入「自动」引擎，支持可选访问令牌与 1500 字符请求上限自动切批 |
 | Microsoft 翻译 | 可选 | 默认走 Bing 翻译页使用的公开通道，无需密钥；遇到限流或需要更高配额时，可打开「使用 Azure 密钥」改用自己的 Azure 订阅（支持批量与区域选择） |
 | LibreTranslate | 自建 | 开源可自部署，数据不出自己的服务器 |
-| Index 翻译 | 否 | B 站开源的 Index-Translate 翻译模型，兼容 OpenAI 接口，免费、无需密钥；排在 AI 引擎首位，支持 150 种语言，全系列自带视觉编码器、原生支持 `image_url` 图片翻译（可在「漫画模式」选作视觉引擎）。公共接口会对浏览器扩展来源的请求返回 HTTP 412 风控页，此时改用官方本地桥接 `http://127.0.0.1:8080/v1`（`python inference/llm/call_api.py --serve`）或自建 vLLM `http://127.0.0.1:8000/v1` |
+| Index 翻译 | 否 | B 站开源的 Index-Translate 翻译模型，兼容 OpenAI 接口，免费、无需密钥；排在 AI 引擎首位，支持 150 种语言，全系列自带视觉编码器、原生支持 `image_url` 图片翻译（可在「漫画模式」选作视觉引擎）。公共接口会对浏览器扩展来源的请求返回 HTTP 412 风控页；Safari 原生版已自动改由 App 的网络层转发（见下方「Safari 原生版」），MV3 扩展版可改用官方本地桥接 `http://127.0.0.1:8080/v1`（`python inference/llm/call_api.py --serve`）或自建 vLLM `http://127.0.0.1:8000/v1` |
 | OpenAI | 是 | 也兼容 one-api、OpenRouter、本地 Ollama 等网关 |
 | DeepSeek | 是 | 国内直连友好、价格低 |
 | Google Gemini | 是 | 免费额度较高，长上下文友好 |
 | Claude | 是 | 已自动附加浏览器直连所需请求头 |
 
-每个引擎卡片都有「测试连接」按钮，会用一句英文实时验证 Key 与网络是否可用。AI 引擎（Index 翻译、OpenAI、DeepSeek、Gemini、Claude、自定义接口）另有「检测模型」按钮：直接请求对应服务的 `/v1/models`（Gemini / Claude 走各自的模型列表接口），把接口实际提供的模型列成可点击标签，点一下即可填入「模型」输入框；它同时也是一次连通性检查，遇到 B 站 HTTP 412 风控页会给出改用本地桥接代理的具体指引。部分第三方网关未实现模型列表接口，此时仍需手动填写模型名。
+每个引擎卡片都有「测试连接」按钮，会用一句英文实时验证 Key 与网络是否可用。AI 引擎（Index 翻译、OpenAI、DeepSeek、Gemini、Claude、自定义接口）另有「检测模型」按钮：直接请求对应服务的 `/v1/models`（Gemini / Claude 走各自的模型列表接口），把接口实际提供的模型列成可点击标签，点一下即可填入「模型」输入框；它同时也是一次连通性检查，遇到 B 站 HTTP 412 风控页会给出改用本地桥接代理的具体指引（Safari 原生版的模型检测同样走原生转发）。部分第三方网关未实现模型列表接口，此时仍需手动填写模型名。
 
 Microsoft 的免费通道复刻了 Bing 翻译页自身的调用方式：先取一次 `bing.com/translator` 页面，从中解析出 `IG`、`IID` 与 `params_AbusePreventionHelper`（key + token），再把这些凭证带到 `/ttranslatev3`。凭证缓存 8 分钟，过期时（HTTP 401/403）自动刷新并重试一次。该端点由微软公开提供但不受正式 SLA 保证，若返回无法识别的页面或持续限流，请改用 Azure 密钥。
 
-**漫画模式（图片翻译）**：在「漫画模式」里可选用 Index 翻译、OpenAI、Gemini、Claude 作为视觉引擎，模型会一次返回各文字区域的坐标、原文与译文，再把译文叠回图片。Index 翻译走与文本翻译相同的匿名 OpenAI 兼容通道，无需密钥，是唯一开箱即用的选项；它是翻译专用模型，偶尔会只返回一段纯译文而不是坐标数组，此时扩展会把该译文铺在整张图上，而不是丢弃这次结果。图片请求同样受 B 站 HTTP 412 风控约束，处理方式与文本翻译一致。
+**漫画模式（图片翻译）**：在「漫画模式」里可选用 Index 翻译、OpenAI、Gemini、Claude 作为视觉引擎，模型会一次返回各文字区域的坐标、原文与译文，再把译文叠回图片。Index 翻译走与文本翻译相同的匿名 OpenAI 兼容通道，无需密钥，是唯一开箱即用的选项；它是翻译专用模型，偶尔会只返回一段纯译文而不是坐标数组，此时扩展会把该译文铺在整张图上，而不是丢弃这次结果。图片请求同样受 B 站 HTTP 412 风控约束，处理方式与文本翻译一致（Safari 原生版自动走原生转发；超过 2 MB 的图片请求仍由浏览器直接发出，因为 plist 形式的原生消息不适合承载大体积 base64）。
+
 
 ### 显示模式
 
@@ -230,6 +231,7 @@ Safari 14+ 可用 Xcode 的 **Safari Web Extension Converter** 导入 `extension
 使用 Xcode 打开 [`openTranslate/openTranslate.xcodeproj`](openTranslate/openTranslate.xcodeproj)，选择 `openTranslate (iOS)` 或 `openTranslate (macOS)` scheme，设置自己的 Team 和 Bundle Identifier 后运行或 Archive。首次安装后需在 Safari 的「扩展」设置中启用 Open Translate，并授予目标网站访问权限。
 
 `openTranslate/Shared (Extension)/Resources/` 是 Safari 扩展打包副本；修改浏览器扩展后，请同步 `extension/` 中的资源，再重新构建原生工程。原生版本使用 Safari 兼容的 background scripts 配置，不依赖 Chrome 专有的 service worker 启动方式。
+
 
 ### 打包与发布（GitHub Actions）
 

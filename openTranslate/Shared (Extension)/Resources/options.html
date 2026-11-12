@@ -492,6 +492,7 @@
       <div class="section-head">
         <h2>翻译服务</h2>
         <p>每个引擎独立保存密钥。点击「使用」即可切换为当前引擎，点击「测试连接」可用一句英文验证连通性；AI 引擎还可点「检测模型」读取接口实际提供的模型列表，点击标签即可填入「模型」。</p>
+        <p>Safari 原生版会自动把 Index 翻译的请求交给 App 的网络层（URLSession）转发，请求不带浏览器扩展的 Origin，可避开 B 站风控的 HTTP 412；MV3 扩展版如仍被拦截，请把接口地址改为官方本地桥接或自建 vLLM 地址。</p>
       </div>
       <div id="services-list"></div>
     </section>
