@@ -1,7 +1,7 @@
 // Build the Firefox MV3 package from the very same source tree as the Chrome CRX.
 //
 //   node scripts/build-firefox.mjs
-//   VERSION=1.0.0 node scripts/build-firefox.mjs   # CI passes the manifest version
+//   VERSION=1.1.0 node scripts/build-firefox.mjs   # CI passes the manifest version
 //
 // Outputs (in dist/):
 //   open-translate-<version>-firefox.xpi  - unsigned XPI (about:debugging / AMO upload)
